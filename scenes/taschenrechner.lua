@@ -300,7 +300,18 @@ function scene:create(event)
     })
 end
 
-function scene:show(event) end
+function scene:show(event)
+    if event.phase == "did" then
+        if event.params and event.params.reset then
+            -- Reset wie AC
+            leftValue = ""
+            operator = ""
+            rightValue = ""
+            displayObj:clear()
+        end
+    end
+end
+
 function scene:hide(event) end
 function scene:destroy(event) end
 
