@@ -1,27 +1,29 @@
 -- scenes/taschenrechner.lua
 
-local Sound = require("sound")
+local Sound    = require("sound")
 local composer = require("composer")
-local scene = composer.newScene()
+local scene    = composer.newScene()
 
-local layout = require("layout")
-local Button = require("ui.button")
-local Display = require("ui.display")
+local layout   = require("layout")
+local Button   = require("ui.button")
+local Display  = require("ui.display")
 local HelpPopup = require("ui.help_popup")
-local i18n = require("lang.i18n")
+local i18n     = require("lang.i18n")
+local LangMenu = require("ui.lang_menu")
 
 ---------------------------------------------------------
 -- Interner Zustand des Rechners
 ---------------------------------------------------------
-local leftValue = ""
-local operator = ""
+local leftValue  = ""
+local operator   = ""
 local rightValue = ""
 
 local displayObj
-
 local sceneGroupRef  -- wird in scene:create gesetzt
 
+---------------------------------------------------------
 -- Explosion-Sheet vorbereiten
+---------------------------------------------------------
 local explosionSheetOptions = {
     width = 90,
     height = 160,
@@ -39,14 +41,14 @@ local explosionSequenceData = {
 local function triggerExplosion()
     if not sceneGroupRef then return end
 
-    -- Sprite über allem anzeigen (Mitte des Bildschirms oder Display)
+    -- Sprite über allem anzeigen (Mitte des Bildschirms)
     local spr = display.newSprite(sceneGroupRef, explosionSheet, explosionSequenceData)
     spr.x = display.contentCenterX
     spr.y = display.contentCenterY
+
     -- Sprite auf volle Bildschirmgröße skalieren
     local screenW = display.contentWidth
     local screenH = display.contentHeight
-
     spr.xScale = screenW / 90     -- Frame-Breite
     spr.yScale = screenH / 160    -- Frame-Höhe
 
@@ -56,15 +58,14 @@ local function triggerExplosion()
     -- Animation starten
     spr:play()
 
-    -- Nach Ende Animation entfernen
+    -- Nach Ende Animation entfernen + Rechner resetten
     local function onSpriteEvent(event)
         if event.phase == "ended" then
             spr:removeEventListener("sprite", onSpriteEvent)
             display.remove(spr)
 
-            -- 🔄 Taschenrechner zurücksetzen (AC-Funktion)
-            leftValue = ""
-            operator = ""
+            leftValue  = ""
+            operator   = ""
             rightValue = ""
             displayObj:clear()
         end
@@ -75,16 +76,13 @@ end
 ---------------------------------------------------------
 -- Hilfsfunktionen für Rechenlogik
 ---------------------------------------------------------
-
 local function updateDisplay()
     displayObj:setExpression(leftValue, operator, rightValue)
-    -- KEIN setResult() mehr hier
 end
 
 ---------------------------------------------------------
 -- Button-Callbacks
 ---------------------------------------------------------
-
 local function onDigitPressed(d)
     if operator == "" then
         -- linke Seite: max. 2 Ziffern
@@ -103,7 +101,7 @@ local function onDigitPressed(d)
         -- Sonderfall Division: linke Zahl muss >= rechte sein
         if operator == "/" then
             local leftNum  = tonumber(leftValue) or 0
-            local rightNum = tonumber(d) or 0      -- rechte Zahl ist einstellig
+            local rightNum = tonumber(d) or 0
             if not (leftNum >= rightNum) then
                 Sound.playPop()
                 return
@@ -129,8 +127,8 @@ local function onOperatorPressed(op)
 end
 
 local function onClearPressed()
-    leftValue = ""
-    operator = ""
+    leftValue  = ""
+    operator   = ""
     rightValue = ""
     displayObj:clear()
 end
@@ -146,7 +144,7 @@ local function onDeletePressed()
     updateDisplay()
 end
 
-local currentResult = nil  -- oben als lokale Variable
+local currentResult = nil
 
 local function onEqualsPressed()
     if leftValue == "" or operator == "" or rightValue == "" then
@@ -169,21 +167,19 @@ local function onEqualsPressed()
     if operator == "*" then r = a * b end
     if operator == "/" then r = a / b end
 
-    currentResult = r       -- Ergebnis nur intern merken
-    -- NICHT: displayObj:setResult(r)
+    currentResult = r  -- nur intern
 
-    -- Werte ggf. an die Minispiel-Scene übergeben:
     local params = {
-        left  = a,
-        right = b,
-        op    = operator,
+        left   = a,
+        right  = b,
+        op     = operator,
         result = r,
     }
 
-    if operator == "+" then composer.gotoScene("scenes.addieren", { params = params }) end
-    if operator == "-" then composer.gotoScene("scenes.subtrahieren", { params = params }) end
+    if operator == "+" then composer.gotoScene("scenes.addieren",       { params = params }) end
+    if operator == "-" then composer.gotoScene("scenes.subtrahieren",   { params = params }) end
     if operator == "*" then composer.gotoScene("scenes.multiplizieren", { params = params }) end
-    if operator == "/" then composer.gotoScene("scenes.dividieren", { params = params }) end
+    if operator == "/" then composer.gotoScene("scenes.dividieren",     { params = params }) end
 end
 
 ---------------------------------------------------------
@@ -192,6 +188,7 @@ end
 function scene:create(event)
     local sceneGroup = self.view
     sceneGroupRef = sceneGroup
+
     -----------------------------------------------------
     -- Display
     -----------------------------------------------------
@@ -201,7 +198,6 @@ function scene:create(event)
     -----------------------------------------------------
     -- 4×4 Zahlen- und Operator-Buttons
     -----------------------------------------------------
-
     local symbols = {
         "7","8","9","AC",
         "4","5","6","DEL",
@@ -210,14 +206,14 @@ function scene:create(event)
     }
 
     local index = 1
-    for row = 1,4 do
-        for col = 1,4 do
+    for row = 1, 4 do
+        for col = 1, 4 do
             local label = symbols[index]
             index = index + 1
 
             local cx, cy = layout.getGridButtonCenter(col, row)
 
-            local btn = Button.new(sceneGroup, {
+            Button.new(sceneGroup, {
                 image  = "imgs/btn_key.png",
                 width  = layout.buttonsGrid.btnWidth,
                 height = layout.buttonsGrid.btnHeight,
@@ -250,7 +246,7 @@ function scene:create(event)
         scale  = layout.longButtons.scale,
         x      = cx1,
         y      = cy1,
-        onTap = onEqualsPressed
+        onTap  = onEqualsPressed
     })
 
     local cx2, cy2 = layout.getLongButtonCenter(2)
@@ -268,7 +264,7 @@ function scene:create(event)
     })
 
     -----------------------------------------------------
-    -- Settings Icon
+    -- Settings Icon (öffnet Sprach-Dropdown)
     -----------------------------------------------------
     local sx, sy = layout.toCenter(layout.settingsIcon)
     Button.new(sceneGroup, {
@@ -279,7 +275,7 @@ function scene:create(event)
         x      = sx,
         y      = sy,
         onTap = function()
-            composer.gotoScene("scenes.settings")
+            LangMenu.toggle(sceneGroup, sx, sy)
         end
     })
 
@@ -303,9 +299,8 @@ end
 function scene:show(event)
     if event.phase == "did" then
         if event.params and event.params.reset then
-            -- Reset wie AC
-            leftValue = ""
-            operator = ""
+            leftValue  = ""
+            operator   = ""
             rightValue = ""
             displayObj:clear()
         end

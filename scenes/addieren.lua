@@ -1,79 +1,96 @@
 -- scenes/addieren.lua
-local composer   = require("composer")
-local scene      = composer.newScene()
+local composer       = require("composer")
+local scene          = composer.newScene()
 
-local layout     = require("layout")
-local Button     = require("ui.button")
-local HelpPopup  = require("ui.help_popup")
-local i18n       = require("lang.i18n")
+local layout         = require("layout")
+local Button         = require("ui.button")
+local HelpPopup      = require("ui.help_popup")
+local i18n           = require("lang.i18n")
+local CounterMachine = require("ui.counter_machine")
 
 ---------------------------------------------------------
 -- Lokale Variablen
 ---------------------------------------------------------
 local marbles = {}
-local bottomRect
-local counterText
-
----------------------------------------------------------
--- Hilfsfunktion: Prüfen, ob ein Punkt in einem Rechteck ist
----------------------------------------------------------
-local function pointInRect(x, y, rect)
-    local halfW = rect.width * 0.5
-    local halfH = rect.height * 0.5
-    return  x >= rect.x - halfW and x <= rect.x + halfW and
-            y >= rect.y - halfH and y <= rect.y + halfH
-end
-
----------------------------------------------------------
--- Zähler aktualisieren (wie viele Murmeln sind unten?)
----------------------------------------------------------
-local function updateCounter()
-    local count = 0
-    for _, m in ipairs(marbles) do
-        if m.inBottom then
-            count = count + 1
-        end
-    end
-    if counterText then
-        counterText.text = tostring(count)
-    end
-end
+local machine  -- CounterMachine-Instanz
 
 ---------------------------------------------------------
 -- Touch-Listener für Murmeln
 ---------------------------------------------------------
 local function marbleTouch(event)
     local target = event.target
+    if not target or target.removed then
+        return false
+    end
 
     if event.phase == "began" then
         display.getCurrentStage():setFocus(target)
         target.isFocus = true
         target.touchOffsetX = event.x - target.x
         target.touchOffsetY = event.y - target.y
-        target:toFront()
         return true
 
     elseif target.isFocus then
         if event.phase == "moved" then
             target.x = event.x - target.touchOffsetX
             target.y = event.y - target.touchOffsetY
+
         elseif event.phase == "ended" or event.phase == "cancelled" then
             display.getCurrentStage():setFocus(nil)
             target.isFocus = false
 
-            -- Ist die Murmel im unteren Feld?
-            if pointInRect(target.x, target.y, bottomRect) then
-                target.inBottom = true
+            -- Sicherheitsnetz: falls Spawn nicht gesetzt wurde
+            target.spawnX = target.spawnX or target.x
+            target.spawnY = target.spawnY or target.y
+
+            -- Schwelle: "über die Hälfte nach unten gezogen"
+            local thresholdY = display.contentHeight * 0.5
+
+            if machine and target.y >= thresholdY then
+                -- weiter als die Hälfte → Maschine saugt ein
+                machine:swallowMarble(target)
             else
-                target.inBottom = false
+                -- nicht weit genug → zurück zum Spawnpoint
+                transition.to(target, {
+                    time       = 200,
+                    x          = target.spawnX,
+                    y          = target.spawnY,
+                    transition = easing.outQuad
+                })
             end
 
-            updateCounter()
+            return true
         end
-        return true
     end
 
     return false
+end
+
+---------------------------------------------------------
+-- Murmeln erzeugen
+---------------------------------------------------------
+local function spawnMarbles(sceneGroup, num, containerRect)
+    for i = 1, num do
+        local m = display.newImageRect(
+            sceneGroup,
+            "imgs/marble.png",
+            264 * 0.6,
+            266 * 0.6
+        )
+
+        local halfW = containerRect.width * 0.5 - 40 -- 
+        local halfH = containerRect.height * 0.5 - 40 -- 
+        m.x = containerRect.x + math.random(-halfW, halfW)
+        m.y = containerRect.y + math.random(-halfH, halfH)
+
+        -- Spawnposition merken
+        m.spawnX = m.x
+        m.spawnY = m.y
+
+        m.removed = false
+        m:addEventListener("touch", marbleTouch)
+        marbles[#marbles + 1] = m
+    end
 end
 
 ---------------------------------------------------------
@@ -84,10 +101,10 @@ function scene:create(event)
     local params = event.params or {}
     local leftValue  = params.left  or 3
     local rightValue = params.right or 4
-    local total      = params.result or (leftValue + rightValue) -- aktuell nur Info
+    -- local total      = params.result or (leftValue + rightValue)
 
     -----------------------------------------------------
-    -- Hintergrund / Banner oben
+    -- Banner / Titel oben
     -----------------------------------------------------
     local banner = display.newImageRect(
         sceneGroup,
@@ -108,13 +125,11 @@ function scene:create(event)
     })
 
     -----------------------------------------------------
-    -- Drei Bereiche: links oben, rechts oben, unten
+    -- Zwei obere Bereiche für die Ausgangsmengen
     -----------------------------------------------------
-    local topY      = display.contentCenterY - 250
-    local bottomY   = display.contentCenterY + 300
-    local areaWidth = display.contentWidth * 0.35
-    local areaHeightTop = 260
-    local areaHeightBottom = 280
+    local topY            = display.contentCenterY -320 -- -220
+    local areaWidth       = display.contentWidth * 0.44 -- 0.35
+    local areaHeightTop   = 700 -- 260 
 
     local leftRect = display.newRoundedRect(
         sceneGroup,
@@ -124,7 +139,7 @@ function scene:create(event)
         areaHeightTop,
         32
     )
-    leftRect:setFillColor(0.1, 0.15, 0.3, 0.8)
+    leftRect:setFillColor(0.1, 0.15, 0.3, 0.85)
 
     local rightRect = display.newRoundedRect(
         sceneGroup,
@@ -134,73 +149,23 @@ function scene:create(event)
         areaHeightTop,
         32
     )
-    rightRect:setFillColor(0.1, 0.15, 0.3, 0.8)
-
-    bottomRect = display.newRoundedRect(
-        sceneGroup,
-        display.contentCenterX,
-        bottomY,
-        display.contentWidth * 0.8,
-        areaHeightBottom,
-        32
-    )
-    bottomRect:setFillColor(0.1, 0.25, 0.35, 0.9)
+    rightRect:setFillColor(0.1, 0.15, 0.3, 0.85)
 
     -----------------------------------------------------
-    -- Zähler (counter.png + Text)
+    -- Murmeln oben spawnen
     -----------------------------------------------------
-    local counterImg = display.newImageRect(
-        sceneGroup,
-        "imgs/counter.png",
-        429 * 0.9,
-        256 * 0.9
-    )
-    counterImg.x = display.contentCenterX
-    counterImg.y = bottomY - areaHeightBottom * 0.5 - 120
+    spawnMarbles(sceneGroup, leftValue, leftRect)
+    spawnMarbles(sceneGroup, rightValue, rightRect)
 
-    counterText = display.newText({
-        parent   = sceneGroup,
-        text     = "0",
-        x        = counterImg.x,
-        y        = counterImg.y + 10,
-        font     = native.systemFontBold,
-        fontSize = 72,
-        align    = "center",
-        width    = counterImg.width * 0.7
+    -----------------------------------------------------
+    -- Zählmaschine unten
+    -----------------------------------------------------
+    machine = CounterMachine.new(sceneGroup, {
+        x     = display.contentCenterX,
+        y     = display.contentHeight * 0.72,
+        scale = 0.8
     })
-
-    -----------------------------------------------------
-    -- Murmeln erzeugen (links + rechts)
-    -----------------------------------------------------
-    local function spawnMarbles(num, containerRect)
-        local created = {}
-        for i = 1, num do
-            local m = display.newImageRect(
-                sceneGroup,
-                "imgs/marble.png",
-                264 * 0.6,
-                266 * 0.6
-            )
-
-            -- zufällige Position innerhalb des Rechtecks
-            local halfW = containerRect.width * 0.5 - 40
-            local halfH = containerRect.height * 0.5 - 40
-            m.x = containerRect.x + math.random(-halfW, halfW)
-            m.y = containerRect.y + math.random(-halfH, halfH)
-
-            m.inBottom = false
-            m:addEventListener("touch", marbleTouch)
-
-            marbles[#marbles + 1] = m
-            created[#created + 1] = m
-        end
-        return created
-    end
-
-    spawnMarbles(leftValue, leftRect)
-    spawnMarbles(rightValue, rightRect)
-
-    updateCounter()
+    machine:setValue(0)
 
     -----------------------------------------------------
     -- Hilfe-Button (Fragezeichen oben rechts)
@@ -219,7 +184,7 @@ function scene:create(event)
     })
 
     -----------------------------------------------------
-    -- Zurück-Button (unten)
+    -- Zurück-Button unten
     -----------------------------------------------------
     local backBtn = Button.new(sceneGroup, {
         image  = "imgs/btn_long_alt.png",
@@ -227,17 +192,17 @@ function scene:create(event)
         height = layout.longButtons.height,
         scale  = layout.longButtons.scale,
         x      = display.contentCenterX,
-        y      = display.contentHeight - 150,
-        onTap = function()
+        y      = display.contentHeight - 120,
+        onTap  = function()
             composer.gotoScene("scenes.taschenrechner", {
                 effect = "slideRight",
-                time = 300,
-                params = { reset = true, from = "addieren" }   -- <<< wichtig
+                time   = 300,
+                params = { reset = true }
             })
+            composer.removeScene("scenes.addieren")
         end
     })
 
-    -- Pfeil auf den Zurück-Button
     local arrow = display.newImageRect(
         sceneGroup,
         "imgs/arrow.png",
@@ -248,13 +213,23 @@ function scene:create(event)
     arrow.y = backBtn.group.y
 end
 
-function scene:show(event) end
-function scene:hide(event) end
+function scene:show(event)
+end
+
+function scene:hide(event)
+end
 
 function scene:destroy(event)
+    -- Aufräumen
+    for i = #marbles, 1, -1 do
+        local m = marbles[i]
+        if m.removeSelf then
+            m:removeSelf()
+        end
+        marbles[i] = nil
+    end
     marbles = {}
-    bottomRect = nil
-    counterText = nil
+    machine = nil
 end
 
 scene:addEventListener("create", scene)
