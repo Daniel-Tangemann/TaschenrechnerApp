@@ -98,10 +98,11 @@ local function onDigitPressed(d)
             return
         end
 
-        -- Sonderfall Division: linke Zahl muss >= rechte sein
-        if operator == "/" then
+        -- Sonderfälle Division und Subtraktion:
+        -- linke Zahl muss >= rechter Ziffer sein
+        if operator == "/" or operator == "-" then
             local leftNum  = tonumber(leftValue) or 0
-            local rightNum = tonumber(d) or 0
+            local rightNum = tonumber(d) or 0  -- rechte Zahl ist einstellig
             if not (leftNum >= rightNum) then
                 Sound.playPop()
                 return
@@ -110,6 +111,7 @@ local function onDigitPressed(d)
 
         rightValue = rightValue .. d
     end
+
     updateDisplay()
 end
 
@@ -198,7 +200,7 @@ function scene:create(event)
     -----------------------------------------------------
     -- 4×4 Zahlen- und Operator-Buttons
     -----------------------------------------------------
-    local symbols = {
+        local symbols = {
         "7","8","9","AC",
         "4","5","6","DEL",
         "1","2","3","/",
@@ -206,12 +208,15 @@ function scene:create(event)
     }
 
     local index = 1
-    for row = 1, 4 do
-        for col = 1, 4 do
+    for row = 1,4 do
+        for col = 1,4 do
             local label = symbols[index]
             index = index + 1
 
             local cx, cy = layout.getGridButtonCenter(col, row)
+
+            local isDigit = tonumber(label) ~= nil
+            local fontSize = isDigit and 72 or 48
 
             Button.new(sceneGroup, {
                 image  = "imgs/btn_key.png",
@@ -220,6 +225,9 @@ function scene:create(event)
                 scale  = layout.buttonsGrid.scale,
                 x      = cx,
                 y      = cy,
+                label  = label,
+                fontSize = fontSize,
+                labelColor = { 1, 1, 1 },   -- oder z.B. {0.1, 0.7, 1} für „digit-blau“
                 onTap = function()
                     if tonumber(label) ~= nil then
                         onDigitPressed(label)
@@ -234,6 +242,7 @@ function scene:create(event)
             })
         end
     end
+
 
     -----------------------------------------------------
     -- Lange Buttons unten (= und Zufall)

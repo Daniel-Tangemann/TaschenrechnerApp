@@ -9,6 +9,24 @@ local i18n           = require("lang.i18n")
 local CounterMachine = require("ui.counter_machine")
 
 ---------------------------------------------------------
+-- Feste Spawn-Positionen (Canvas 1080 x 1920)
+---------------------------------------------------------
+local fixedSpawn = {
+    left = {
+        {138, 380}, {280, 380}, {422, 380},
+        {138, 545}, {280, 545}, {422, 545},
+        {138, 715}, {280, 715}, {422, 715},
+        {138, 890}, {280, 890}, {422, 890},
+    },
+    right = {
+        {618, 380}, {760, 380}, {902, 380},
+        {618, 545}, {760, 545}, {902, 545},
+        {618, 715}, {760, 715}, {902, 715},
+        {618, 890}, {760, 890}, {902, 890},
+    }
+}
+
+---------------------------------------------------------
 -- Lokale Variablen
 ---------------------------------------------------------
 local marbles = {}
@@ -39,7 +57,7 @@ local function marbleTouch(event)
             display.getCurrentStage():setFocus(nil)
             target.isFocus = false
 
-            -- Sicherheitsnetz: falls Spawn nicht gesetzt wurde
+            -- Sicherheitsnetz
             target.spawnX = target.spawnX or target.x
             target.spawnY = target.spawnY or target.y
 
@@ -68,8 +86,12 @@ end
 
 ---------------------------------------------------------
 -- Murmeln erzeugen
+-- side = "left" oder "right"
 ---------------------------------------------------------
-local function spawnMarbles(sceneGroup, num, containerRect)
+local function spawnMarbles(sceneGroup, num, containerRect, side)
+    local list = fixedSpawn[side] or {}
+    local maxFixed = #list
+
     for i = 1, num do
         local m = display.newImageRect(
             sceneGroup,
@@ -78,10 +100,17 @@ local function spawnMarbles(sceneGroup, num, containerRect)
             266 * 0.6
         )
 
-        local halfW = containerRect.width * 0.5 - 40 -- 
-        local halfH = containerRect.height * 0.5 - 40 -- 
-        m.x = containerRect.x + math.random(-halfW, halfW)
-        m.y = containerRect.y + math.random(-halfH, halfH)
+        if i <= maxFixed then
+            -- feste Positionen
+            local pos = list[i]
+            m.x, m.y = pos[1], pos[2]
+        else
+            -- zusätzliche Murmeln: in den Zwischenräumen des jeweiligen Bereichs
+            local halfW = containerRect.width * 0.5 - 40
+            local halfH = containerRect.height * 0.5 - 40
+            m.x = containerRect.x + math.random(-halfW, halfW)
+            m.y = containerRect.y + math.random(-halfH, halfH)
+        end
 
         -- Spawnposition merken
         m.spawnX = m.x
@@ -101,7 +130,6 @@ function scene:create(event)
     local params = event.params or {}
     local leftValue  = params.left  or 3
     local rightValue = params.right or 4
-    -- local total      = params.result or (leftValue + rightValue)
 
     -----------------------------------------------------
     -- Banner / Titel oben
@@ -127,9 +155,9 @@ function scene:create(event)
     -----------------------------------------------------
     -- Zwei obere Bereiche für die Ausgangsmengen
     -----------------------------------------------------
-    local topY            = display.contentCenterY -320 -- -220
-    local areaWidth       = display.contentWidth * 0.44 -- 0.35
-    local areaHeightTop   = 700 -- 260 
+    local topY          = display.contentCenterY - 320
+    local areaWidth     = display.contentWidth * 0.44
+    local areaHeightTop = 700
 
     local leftRect = display.newRoundedRect(
         sceneGroup,
@@ -154,8 +182,8 @@ function scene:create(event)
     -----------------------------------------------------
     -- Murmeln oben spawnen
     -----------------------------------------------------
-    spawnMarbles(sceneGroup, leftValue, leftRect)
-    spawnMarbles(sceneGroup, rightValue, rightRect)
+    spawnMarbles(sceneGroup, leftValue,  leftRect,  "left")
+    spawnMarbles(sceneGroup, rightValue, rightRect, "right")
 
     -----------------------------------------------------
     -- Zählmaschine unten
@@ -220,7 +248,6 @@ function scene:hide(event)
 end
 
 function scene:destroy(event)
-    -- Aufräumen
     for i = #marbles, 1, -1 do
         local m = marbles[i]
         if m.removeSelf then

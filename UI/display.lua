@@ -201,8 +201,8 @@ local function setOperatorSprite(self, opChar)
 
     local frameIndex = nil
     if opChar == "+" then frameIndex = 1 end
-    if opChar == "-" then frameIndex = 2 end
-    if opChar == "*" then frameIndex = 3 end
+    if opChar == "*" then frameIndex = 2 end
+    if opChar == "-" then frameIndex = 3 end
     if opChar == "/" then frameIndex = 4 end
 
     if frameIndex then

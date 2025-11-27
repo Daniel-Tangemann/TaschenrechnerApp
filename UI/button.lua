@@ -1,68 +1,94 @@
 -- ui/button.lua
+-- Generischer Button mit optionalem Text-Label
+
 local Button = {}
 Button.__index = Button
 
--- parentGroup: z.B. sceneGroup
--- config: { image, width, height, scale, x, y, onTap }
-function Button.new(parentGroup, config)
-    assert(parentGroup, "Button.new: parentGroup fehlt")
+-- parentGroup: Anzeigegruppe, in die der Button eingesetzt wird
+-- opts:
+--   image      = Pfad zur Button-Grafik
+--   width      = Basisbreite des Bildes
+--   height     = Basishöhe des Bildes
+--   scale      = Skalierungsfaktor (optional, default 1)
+--   x, y       = Position des Button-Gruppenmittelpunkts
+--   onTap      = Callback-Funktion bei Tap
+--   label      = optionaler Text auf dem Button
+--   font       = Schriftart (optional)
+--   fontSize   = Schriftgröße (optional)
+--   labelOffsetY = vertikaler Offset fürs Label (optional)
+--   labelColor = {r,g,b} (optional)
+function Button.new(parentGroup, opts)
+    opts = opts or {}
 
     local self = setmetatable({}, Button)
 
-    self.image    = config.image
-    self.width    = config.width
-    self.height   = config.height
-    self.scale    = config.scale or 1.0
-    self.x        = config.x
-    self.y        = config.y
-    self.onTap    = config.onTap
-    self.disabled = false
-
-    -- Gruppe
+    -- Obergruppe des Buttons
     local group = display.newGroup()
     parentGroup:insert(group)
     self.group = group
 
-    -- Hintergrundbild
-    local w = self.width * self.scale
-    local h = self.height * self.scale
+    ----------------------------------------------------
+    -- Bild (Button-Hintergrund)
+    ----------------------------------------------------
+    local img = display.newImageRect(
+        group,
+        opts.image,
+        opts.width,
+        opts.height
+    )
+    img.x, img.y = 0, 0
 
-    self.bg = display.newImageRect(group, self.image, w, h)
-    self.bg.x, self.bg.y = 0, 0
+    local scale = opts.scale or 1.0
+    img.xScale = scale
+    img.yScale = scale
 
-    -- Tap-Listener direkt auf das sichtbare Objekt
-    local function tapListener(event)
-        if self.disabled then return true end
-        if self.onTap then
-            self.onTap(self)
-        end
-        return true
+    -- Effektive Breite/Höhe nach Skalierung merken
+    self.width  = opts.width  * scale
+    self.height = opts.height * scale
+    self.image  = img
+
+    -- Position der Gruppe (damit alles zusammen verschoben wird)
+    group.x = opts.x or 0
+    group.y = opts.y or 0
+
+    ----------------------------------------------------
+    -- Optionales Label
+    ----------------------------------------------------
+    self.label = nil
+    if opts.label then
+        local font       = opts.font or native.systemFontBold
+        local fontSize   = opts.fontSize or 64
+        local offsetY    = opts.labelOffsetY or 0
+        local textColor  = opts.labelColor or { 1, 1, 1 }
+
+        local lbl = display.newText({
+            parent   = group,
+            text     = opts.label,
+            x        = 0,
+            y        = offsetY,
+            font     = font,
+            fontSize = fontSize,
+            align    = "center",
+            width    = self.width * 0.8,
+        })
+        lbl:setFillColor(textColor[1], textColor[2], textColor[3])
+
+        self.label = lbl
     end
-    self.bg:addEventListener("tap", tapListener)
 
-    -- Position (Center)
-    group.x = self.x
-    group.y = self.y
+    ----------------------------------------------------
+    -- Tap-Interaktion (einfach & zuverlässig)
+    ----------------------------------------------------
+    if opts.onTap then
+        local function onTap(event)
+            opts.onTap()
+            return true
+        end
+        img:addEventListener("tap", onTap)
+        self._tapListener = onTap
+    end
 
     return self
-end
-
-function Button:highlight(on)
-    if not self.bg then return end
-    if on then
-        transition.to(self.bg, { time = 80, xScale = 1.05, yScale = 1.05 })
-    else
-        transition.to(self.bg, { time = 80, xScale = 1.00, yScale = 1.00 })
-    end
-end
-
-function Button:setEnabled(flag)
-    self.disabled = not flag
-    if flag then
-        self.group.alpha = 1.0
-    else
-        self.group.alpha = 0.35
-    end
 end
 
 return Button
