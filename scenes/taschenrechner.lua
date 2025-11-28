@@ -185,6 +185,69 @@ local function onEqualsPressed()
 end
 
 ---------------------------------------------------------
+-- Zufällige Aufgabe generieren und direkt starten
+---------------------------------------------------------
+local function startRandomTask()
+    -- Zufälligen Operator wählen
+    local ops = { "+", "-", "*", "/" }
+    local op  = ops[ math.random(1, #ops) ]
+
+    local a, b
+
+    if op == "+" then
+        -- 1–99 + 1–9
+        a = math.random(1, 99)
+        b = math.random(1, 9)
+
+    elseif op == "-" then
+        -- keine negativen Ergebnisse: a >= b
+        b = math.random(1, 9)
+        a = math.random(b, 99)
+
+    elseif op == "*" then
+        -- Produkt überschaubar halten
+        a = math.random(1, 12)   -- linke Zahl
+        b = math.random(1, 9)    -- rechte Zahl (1-stellig)
+
+    elseif op == "/" then
+        -- Division: rechte Zahl 1–9, linke Zahl >= rechte
+        b = math.random(1, 9)
+        a = math.random(b, 99)
+    end
+
+    -- Ergebnis berechnen
+    local r
+    if op == "+" then r = a + b end
+    if op == "-" then r = a - b end
+    if op == "*" then r = a * b end
+    if op == "/" then r = a / b end
+
+    -- Taschenrechner-State setzen, damit das Display es kurz zeigt
+    leftValue  = tostring(a)
+    operator   = op
+    rightValue = tostring(b)
+    updateDisplay()
+
+    -- Parameter fürs Minispiel
+    local params = {
+        left   = a,
+        right  = b,
+        op     = op,
+        result = r,
+    }
+
+    if op == "+" then
+        composer.gotoScene("scenes.addieren",       { params = params })
+    elseif op == "-" then
+        composer.gotoScene("scenes.subtrahieren",   { params = params })
+    elseif op == "*" then
+        composer.gotoScene("scenes.multiplizieren", { params = params })
+    elseif op == "/" then
+        composer.gotoScene("scenes.dividieren",     { params = params })
+    end
+end
+
+---------------------------------------------------------
 -- Scene UI erstellen
 ---------------------------------------------------------
 function scene:create(event)
@@ -268,7 +331,7 @@ function scene:create(event)
         y      = cy2,
         onTap = function()
             -- Zufalls-Aufgabe (Hook)
-            print("RANDOM TASK")
+            startRandomTask()
         end
     })
 
