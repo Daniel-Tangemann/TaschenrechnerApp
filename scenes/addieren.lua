@@ -132,13 +132,25 @@ function scene:create(event)
     local rightValue = params.right or 4
 
     -----------------------------------------------------
+    -- Background
+    -----------------------------------------------------
+    local backgr = display.newImageRect(
+        sceneGroup,
+        "imgs/add_backgr.png",
+        1080,
+        1920
+    )
+    backgr.x = display.contentCenterX
+    backgr.y = display.contentCenterY
+
+    -----------------------------------------------------
     -- Banner / Titel oben
     -----------------------------------------------------
     local banner = display.newImageRect(
         sceneGroup,
         "imgs/banner.png",
-        layout.screen.width * 0.9,
-        layout.screen.height * 0.12
+        788 *0.7,
+        206 *0.7
     )
     banner.x = display.contentCenterX
     banner.y = 120

@@ -86,6 +86,7 @@ function CounterMachine.new(parentGroup, opts)
         }
     end
 
+    self.body:toFront()
     ------------------------------------------------------------
     -- Trichter-Treffpunkt (für Murmel-Animation)
     ------------------------------------------------------------

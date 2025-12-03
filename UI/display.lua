@@ -10,20 +10,20 @@ Display.__index = Display
 ------------------------------------------------------------------
 -- Konfiguration für das Zahlen-SpriteSheet
 ------------------------------------------------------------------
--- numbers.png: 1570 x 867, 2 Reihen, 5 Spalten
-local DIGIT_SHEET_W  = 1570
-local DIGIT_SHEET_H  = 867
+-- numbers.png: 1743 x 949, 2 Reihen, 5 Spalten
+local DIGIT_SHEET_W  = 1743
+local DIGIT_SHEET_H  = 949
 local DIGIT_COLS     = 5
 local DIGIT_ROWS     = 2
-local DIGIT_FRAME_W  = 314            -- 1570 / 5
-local DIGIT_FRAME_H  = 433            -- 867 / 2 ≈ 433.5 → 433, unten bleibt 1px übrig
+local DIGIT_FRAME_W  = 348            -- 1743 / 5 = 348.6
+local DIGIT_FRAME_H  = 474            -- 949 / 2 = 474.5
 
--- operators.png: 689 x 134, 4 Symbole in einer Reihe
-local OP_SHEET_W     = 689
-local OP_SHEET_H     = 134
+-- operators.png: 616 x 164, 4 Symbole in einer Reihe
+local OP_SHEET_W     = 616
+local OP_SHEET_H     = 164
 local OP_COLS        = 4
-local OP_FRAME_W     = 172            -- 689 / 4 ≈ 172.25 → 172, rechts bleibt 1px übrig
-local OP_FRAME_H     = 134
+local OP_FRAME_W     = 154           -- 616 / 4 = 154
+local OP_FRAME_H     = 164
 
 ------------------------------------------------------------------
 -- Hilfsfunktion: Sheet für Ziffern + Operatoren erstellen
@@ -135,7 +135,7 @@ function Display.new(parentGroup)
 
     -- D3 (rechte Ziffer, nach dem Operator)
     local spr3 = display.newSprite(self.group, self.digitSheet, self.digitSeqData)
-    spr3.x = slotX[4]      -- wichtig: Slot 4!
+    spr3.x = slotX[4]   -- wichtig: Slot 4!
     spr3.y = yPos
     spr3.xScale, spr3.yScale = digitScale, digitScale
     spr3.isVisible = false
@@ -143,7 +143,7 @@ function Display.new(parentGroup)
 
     -- Operator-Sprite in Slot 3
     self.opSprite = display.newSprite(self.group, self.opSheet, self.opSeqData)
-    self.opSprite.x = slotX[3] -5
+    self.opSprite.x = slotX[3] 
     self.opSprite.y = yPos
 
     -- Operator-Skalierung hinzufügen:

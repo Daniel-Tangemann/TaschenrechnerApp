@@ -9,7 +9,7 @@ local i18n           = require("lang.i18n")
 local CounterMachine = require("ui.counter_machine")
 
 ---------------------------------------------------------
--- Feste Spawn-Positionen (Canvas 1080 x 1920)
+-- Feste Spawn-Positionen für Dividend (linkes Feld)
 ---------------------------------------------------------
 local fixedSpawn = {
     left = {
@@ -24,78 +24,91 @@ local fixedSpawn = {
 -- Lokale Variablen
 ---------------------------------------------------------
 local marbles        = {}
-local machine        -- CounterMachine-Instanz
-local remainderRect  -- Bereich für den Teilungsrest
-local cloneCenterX, cloneCenterY  -- Funnel-Zentrum der Maschine (unterer Trichter)
-local divisor        = 1    -- rechte Zahl (Teiler)
-local groupCount     = 0    -- wie viele Murmeln wurden in der aktuellen Gruppe geschluckt?
+local machine
+local remainderRect
+local divisor        = 1
+local groupCount     = 0
+
+-- Rest-Logik
+local maxRemainder   = 0      -- wie viele Murmeln dürfen im Rest landen
+local remainderCount = 0      -- wie viele sind tatsächlich im Rest gelandet
 
 -- Segmentbalken
 local segmentBarGroup
 local segmentRects = {}
 
+-- Schlucklinie (wird in scene:create dynamisch gesetzt)
+local SWALLOW_LINE_Y = 2000
+
+-- Feste Slots für Rest-Murmeln (max. 9)
+local restSlots = {}
+
 ---------------------------------------------------------
--- kleine Hilfsfunktion
+-- Hilfsfunktion: Punkt in Rechteck?
 ---------------------------------------------------------
 local function pointInRect(x, y, rect)
-    local halfW = rect.width * 0.5
-    local halfH = rect.height * 0.5
-    return  x >= rect.x - halfW and x <= rect.x + halfW and
-            y >= rect.y - halfH and y <= rect.y + halfH
+    local hw = rect.width * 0.5
+    local hh = rect.height * 0.5
+    return  x >= rect.x - hw and x <= rect.x + hw
+        and y >= rect.y - hh and y <= rect.y + hh
 end
 
 ---------------------------------------------------------
 -- Segmentbalken aktualisieren
 ---------------------------------------------------------
 local function updateSegmentBar()
-    if not segmentRects or #segmentRects == 0 then return end
-
     for i, seg in ipairs(segmentRects) do
         if i <= groupCount then
-            seg:setFillColor(0.9, 0.9, 0.2)   -- ✏️ Farbe "aktives" Segment
+            seg:setFillColor(1, 1, 0.2)
         else
-            seg:setFillColor(0.2, 0.2, 0.3)   -- ✏️ Farbe "inaktiv"
+            seg:setFillColor(0.2, 0.2, 0.35)
         end
     end
 end
 
 ---------------------------------------------------------
--- wenn eine Murmel komplett geschluckt ist
+-- Letztes Segment kurz blinken lassen
+---------------------------------------------------------
+local function blinkLastSegment(index)
+    local seg = segmentRects[index]
+    if not seg then return end
+
+    transition.to(seg, { time = 120, alpha = 0.1 })
+    transition.to(seg, { time = 120, delay = 120, alpha = 1 })
+end
+
+---------------------------------------------------------
+-- Wenn eine Murmel gezählt wurde
 ---------------------------------------------------------
 local function onMarbleCounted()
-    if divisor <= 0 then return end
-
     groupCount = groupCount + 1
-    if groupCount >= divisor then
-        -- Eine volle Gruppe: Quotient +1
+
+    if groupCount == divisor then
+        -- komplette Gruppe voll → 1 zum Quotienten und letzter Balken blinkt
+        blinkLastSegment(divisor)
         groupCount = 0
-        if machine then
-            machine:increment()
-        end
+        machine:increment()
     end
+
     updateSegmentBar()
 end
 
 ---------------------------------------------------------
--- Murmel in Maschine einsaugen
+-- Murmel in die Maschine einsaugen
 ---------------------------------------------------------
-local function swallowIntoMachine(marble)
-    if not marble or marble.removed then
-        return
-    end
-    marble.removed = true
+local function swallowIntoMachine(m)
+    if m.removed then return end
+    m.removed = true
 
-    transition.to(marble, {
-        time   = 180,     -- ✏️ Dauer der Einsaug-Animation
-        x      = cloneCenterX,
-        y      = cloneCenterY,
+    transition.to(m, {
+        time   = 150,
+        x      = machine.group.x + machine.funnelX,
+        y      = machine.group.y + machine.funnelY,
         xScale = 0.3,
         yScale = 0.3,
-        alpha  = 0.0,
+        alpha  = 0,
         onComplete = function()
-            if marble.removeSelf then
-                marble:removeSelf()
-            end
+            if m.removeSelf then m:removeSelf() end
             onMarbleCounted()
         end
     })
@@ -105,70 +118,76 @@ end
 -- Touch-Listener für Murmeln
 ---------------------------------------------------------
 local function marbleTouch(event)
-    local target = event.target
-    if not target or target.removed then
-        return false
-    end
+    local m = event.target
+    if m.removed then return end
 
     if event.phase == "began" then
-        display.getCurrentStage():setFocus(target)
-        target.isFocus = true
-        target.touchOffsetX = event.x - target.x
-        target.touchOffsetY = event.y - target.y
+        display.getCurrentStage():setFocus(m)
+        m.isFocus = true
+        m.ox = event.x - m.x
+        m.oy = event.y - m.y
         return true
 
-    elseif target.isFocus then
+    elseif m.isFocus then
+
         if event.phase == "moved" then
-            target.x = event.x - target.touchOffsetX
-            target.y = event.y - target.touchOffsetY
+            m.x = event.x - m.ox
+            m.y = event.y - m.oy
 
         elseif event.phase == "ended" or event.phase == "cancelled" then
             display.getCurrentStage():setFocus(nil)
-            target.isFocus = false
+            m.isFocus = false
 
-            -- Spawn fallback
-            target.spawnX = target.spawnX or target.x
-            target.spawnY = target.spawnY or target.y
-
-            local x, y = target.x, target.y
+            local x, y = m.x, m.y
 
             -------------------------------------------------
-            -- 1) In den unteren Trichter? → Maschine schluckt
+            -- 1) Schlucklinie: Maschine frisst Murmel
             -------------------------------------------------
-            local dx = x - cloneCenterX
-            local dy = y - cloneCenterY
-            local dist2 = dx*dx + dy*dy
-            local radius = 260        -- ✏️ Größe der Fangzone des unteren Trichters
-
-            if dist2 <= radius * radius then
-                swallowIntoMachine(target)
+            if y >= SWALLOW_LINE_Y then
+                swallowIntoMachine(m)
                 return true
             end
 
             -------------------------------------------------
-            -- 2) Im Rest-Feld? → dort ablegen und "sperren"
+            -- 2) Restfeld: maxRemainder begrenzt, feste Slots
             -------------------------------------------------
             if remainderRect and pointInRect(x, y, remainderRect) then
-                -- Snap etwas in die Mitte des Restfeldes
-                transition.to(target, {
-                    time = 120,
-                    x = remainderRect.x,       -- ✏️ ggf. etwas zufällige Position im Restfeld
-                    y = remainderRect.y,
-                    onComplete = function()
-                        target:removeEventListener("touch", marbleTouch)
+                if remainderCount < maxRemainder then
+                    remainderCount = remainderCount + 1
+
+                    -- Slot anhand remainderCount auswählen (1-basiert)
+                    local slot = restSlots[remainderCount]
+                    if not slot then
+                        -- Fallback: Mitte des Restfelds
+                        slot = { x = remainderRect.x, y = remainderRect.y }
                     end
-                })
+
+                    transition.to(m, {
+                        time = 100,
+                        x    = slot.x,
+                        y    = slot.y,
+                        onComplete = function()
+                            m:removeEventListener("touch", marbleTouch)
+                        end
+                    })
+                else
+                    -- Kein Platz mehr im Rest → zurück zum Spawn
+                    transition.to(m, {
+                        time = 180,
+                        x    = m.spawnX,
+                        y    = m.spawnY
+                    })
+                end
                 return true
             end
 
             -------------------------------------------------
-            -- 3) Sonst zurück zum Spawn
+            -- 3) Sonst zurück zum Spawnpunkt
             -------------------------------------------------
-            transition.to(target, {
-                time       = 200,
-                x          = target.spawnX,
-                y          = target.spawnY,
-                transition = easing.outQuad
+            transition.to(m, {
+                time = 180,
+                x    = m.spawnX,
+                y    = m.spawnY
             })
             return true
         end
@@ -178,32 +197,24 @@ local function marbleTouch(event)
 end
 
 ---------------------------------------------------------
--- Murmeln erzeugen (links)
+-- Murmeln im linken Feld erzeugen
 ---------------------------------------------------------
-local function spawnMarbles(sceneGroup, num, containerRect)
-    local list = fixedSpawn.left or {}
-    local maxFixed = #list
-
+local function spawnMarbles(sceneGroup, num, rect)
+    local list = fixedSpawn.left
     for i = 1, num do
-        local m = display.newImageRect(
-            sceneGroup,
-            "imgs/marble.png",
-            264 * 0.6,   -- ✏️ Murmelgröße
-            266 * 0.6
-        )
+        local m = display.newImageRect(sceneGroup, "imgs/marble.png", 264 * 0.6, 266 * 0.6)
 
-        if i <= maxFixed then
-            local pos = list[i]
-            m.x, m.y = pos[1], pos[2]
+        if i <= #list then
+            m.x, m.y = list[i][1], list[i][2]
         else
-            local halfW = containerRect.width * 0.5 - 40
-            local halfH = containerRect.height * 0.5 - 40
-            m.x = containerRect.x + math.random(-halfW, halfW)
-            m.y = containerRect.y + math.random(-halfH, halfH)
+            local hw = rect.width * 0.5 - 40
+            local hh = rect.height * 0.5 - 40
+            m.x = rect.x + math.random(-hw, hw)
+            m.y = rect.y + math.random(-hh, hh)
         end
 
-        m.spawnX = m.x
-        m.spawnY = m.y
+        m.spawnX  = m.x
+        m.spawnY  = m.y
         m.removed = false
 
         m:addEventListener("touch", marbleTouch)
@@ -212,53 +223,81 @@ local function spawnMarbles(sceneGroup, num, containerRect)
 end
 
 ---------------------------------------------------------
+-- Rest-Slots vorbereiten (max. 9 Slots in 3x3-Gitter)
+---------------------------------------------------------
+local function computeRestSlots()
+    restSlots = {}
+
+    if not remainderRect then return end
+
+    local cx, cy = remainderRect.x, remainderRect.y
+    local hw     = remainderRect.width  * 0.25
+    local hh     = remainderRect.height * 0.25
+
+    -- 3x3-Raster um die Mitte des Restfelds
+    local offsets = {
+        { -hw, -hh }, {  0, -hh }, {  hw, -hh },
+        { -hw,   0 }, {  0,   0 }, {  hw,   0 },
+        { -hw,  hh }, {  0,  hh }, {  hw,  hh },
+    }
+
+    for i = 1, 9 do
+        local off = offsets[i]
+        restSlots[i] = { x = cx + off[1], y = cy + off[2] }
+    end
+end
+
+---------------------------------------------------------
 function scene:create(event)
     local sceneGroup = self.view
-    marbles          = {}
-    segmentRects     = {}
-    groupCount       = 0
 
-    local params = event.params or {}
+    marbles        = {}
+    segmentRects   = {}
+    remainderCount = 0
+    groupCount     = 0
+
+    local params     = event.params or {}
     local leftValue  = params.left  or 10
     local rightValue = params.right or 3
-    divisor          = rightValue or 1
-
+    divisor          = rightValue
     if divisor < 1 then divisor = 1 end
 
-    -----------------------------------------------------
-    -- Banner / Titel oben
-    -----------------------------------------------------
-    local banner = display.newImageRect(
-        sceneGroup,
-        "imgs/banner.png",
-        layout.screen.width * 0.9,
-        layout.screen.height * 0.12
-    )
-    banner.x = display.contentCenterX
-    banner.y = 120
+    maxRemainder = leftValue % divisor  -- mathematisch korrekter Rest
 
-    local title = display.newText({
+    -----------------------------------------------------
+    -- Hintergrund
+    -----------------------------------------------------
+    local back = display.newImageRect(sceneGroup, "imgs/divi_backgr.png", 1080, 1920)
+    back.x, back.y = display.contentCenterX, display.contentCenterY
+
+    -----------------------------------------------------
+    -- Banner / Titel
+    -----------------------------------------------------
+    local banner = display.newImageRect(sceneGroup, "imgs/banner.png", 788 * 0.7, 206 * 0.7)
+    banner.x, banner.y = display.contentCenterX, 120
+
+    display.newText({
         parent   = sceneGroup,
         text     = i18n.t("div_title"),
         x        = banner.x,
         y        = banner.y,
         font     = native.systemFontBold,
-        fontSize = 72       -- ✏️ Titelgröße
+        fontSize = 72
     })
 
     -----------------------------------------------------
-    -- Zwei obere Bereiche: links Dividend, rechts Restfeld
+    -- Obere Bereiche: Dividend links, Rest rechts
     -----------------------------------------------------
-    local topY          = display.contentCenterY - 320
-    local areaWidth     = display.contentWidth * 0.44
-    local areaHeightTop = 700
+    local topY  = display.contentCenterY - 320
+    local areaW = display.contentWidth * 0.44
+    local areaH = 700
 
     local leftRect = display.newRoundedRect(
         sceneGroup,
         display.contentWidth * 0.25,
         topY,
-        areaWidth,
-        areaHeightTop,
+        areaW,
+        areaH,
         32
     )
     leftRect:setFillColor(0.1, 0.15, 0.3, 0.85)
@@ -267,14 +306,19 @@ function scene:create(event)
         sceneGroup,
         display.contentWidth * 0.75,
         topY,
-        areaWidth,
-        areaHeightTop,
+        areaW,
+        areaH,
         32
     )
-    remainderRect:setFillColor(0.15, 0.10, 0.25, 0.85)  -- ✏️ Farbe Restfeld
+    remainderRect:setFillColor(0.15, 0.1, 0.25, 0.85)
 
     -----------------------------------------------------
-    -- Murmeln links spawnen (Dividend)
+    -- Rest-Slots vorberechnen
+    -----------------------------------------------------
+    computeRestSlots()
+
+    -----------------------------------------------------
+    -- Murmeln spawnen
     -----------------------------------------------------
     spawnMarbles(sceneGroup, leftValue, leftRect)
 
@@ -283,59 +327,51 @@ function scene:create(event)
     -----------------------------------------------------
     machine = CounterMachine.new(sceneGroup, {
         x     = display.contentCenterX,
-        y     = display.contentHeight * 0.72,  -- ✏️ vertikale Position
-        scale = 0.8                            -- ✏️ Größe der Zählmaschine
+        y     = display.contentHeight * 0.72,
+        scale = 0.8
     })
     machine:setValue(0)
 
-    -- Funnel-Zentrum ungefähr in der Mitte des oberen Trichters der Maschine
-    cloneCenterX = machine.group.x
-    cloneCenterY = machine.group.y - machine.body.height * 0.45  -- ✏️ Position des unteren Trichters
+    -----------------------------------------------------
+    -- Schlucklinie dynamisch aus Trichterposition
+    -----------------------------------------------------
+    local fx, fy = machine.group:localToContent(machine.funnelX, machine.funnelY)
+    SWALLOW_LINE_Y = fy + 80   -- etwas unterhalb des Funnel-Eingangs
 
     -----------------------------------------------------
-    -- Segmentbalken über der Maschine
+    -- Segmentbalken unter den Rollen (mit deinen Werten)
     -----------------------------------------------------
     segmentBarGroup = display.newGroup()
     sceneGroup:insert(segmentBarGroup)
 
-    local segCount = math.max(1, divisor)
-    local barWidth  = machine.body.width * 0.6   -- ✏️ Breite des Balkens relativ zur Maschine
-    local barHeight = 26                         -- ✏️ Höhe des Balkens
-    local barX      = machine.group.x
-    local barY      = machine.group.y - machine.body.height * 0.1  -- ✏️ vertikale Position des Balkens
+    local bodyW = machine.body.width
+    local bodyH = machine.body.height
 
-    local gap       = 4                          -- ✏️ Abstand zwischen Segmenten
-    local segWidth  = (barWidth - (segCount - 1) * gap) / segCount
+    local barWidth  = bodyW * 0.6        -- deine funktionierenden Werte
+    local barHeight = bodyH * 0.08
+    local barX      = machine.group.x + bodyW * 0.1
+    local barY      = machine.group.y + bodyH * 0.36
 
     -- Hintergrund des Balkens
-    local barBg = display.newRoundedRect(
-        segmentBarGroup,
-        barX,
-        barY,
-        barWidth + 8,
-        barHeight + 8,
-        8
-    )
+    local barBg = display.newRoundedRect(segmentBarGroup, barX, barY, barWidth, barHeight, 10)
     barBg:setFillColor(0, 0, 0, 0.6)
 
+    -- Segmente entsprechend dem Divisor
+    local segCount = divisor
+    local gap      = 4
+    local segW     = (barWidth - gap * (segCount - 1)) / segCount
+
     for i = 1, segCount do
-        local x = barX - barWidth * 0.5 + segWidth * 0.5 + (i - 1) * (segWidth + gap)
-        local seg = display.newRoundedRect(
-            segmentBarGroup,
-            x,
-            barY,
-            segWidth,
-            barHeight,
-            6
-        )
-        seg:setFillColor(0.2, 0.2, 0.3)
+        local x = barX - barWidth * 0.5 + segW * 0.5 + (i - 1) * (segW + gap)
+        local seg = display.newRoundedRect(segmentBarGroup, x, barY, segW, barHeight, 8)
+        seg:setFillColor(0.2, 0.2, 0.35)
         segmentRects[#segmentRects + 1] = seg
     end
 
     updateSegmentBar()
 
     -----------------------------------------------------
-    -- Hilfe-Button (Fragezeichen oben rechts)
+    -- Hilfe-Button
     -----------------------------------------------------
     local hx, hy = layout.toCenter(layout.helpIcon)
     Button.new(sceneGroup, {
@@ -351,7 +387,7 @@ function scene:create(event)
     })
 
     -----------------------------------------------------
-    -- Zurück-Button unten
+    -- Zurück-Button
     -----------------------------------------------------
     local backBtn = Button.new(sceneGroup, {
         image  = "imgs/btn_long_alt.png",
@@ -370,28 +406,16 @@ function scene:create(event)
         end
     })
 
-    local arrow = display.newImageRect(
-        sceneGroup,
-        "imgs/arrow.png",
-        669 * 0.2,
-        267 * 0.2
-    )
+    local arrow = display.newImageRect(sceneGroup, "imgs/arrow.png", 669 * 0.2, 267 * 0.2)
     arrow.x = backBtn.group.x - backBtn.width * 0.15
     arrow.y = backBtn.group.y
 end
 
-function scene:show(event)
-end
-
-function scene:hide(event)
-end
-
+---------------------------------------------------------
 function scene:destroy(event)
     for i = #marbles, 1, -1 do
         local m = marbles[i]
-        if m.removeSelf then
-            m:removeSelf()
-        end
+        if m.removeSelf then m:removeSelf() end
         marbles[i] = nil
     end
     marbles = {}
@@ -400,15 +424,11 @@ function scene:destroy(event)
         segmentBarGroup:removeSelf()
     end
     segmentBarGroup = nil
-    segmentRects = {}
-
-    machine       = nil
-    remainderRect = nil
+    segmentRects    = {}
+    restSlots       = {}
 end
 
 scene:addEventListener("create", scene)
-scene:addEventListener("show", scene)
-scene:addEventListener("hide", scene)
 scene:addEventListener("destroy", scene)
 
 return scene

@@ -255,6 +255,18 @@ function scene:create(event)
     sceneGroupRef = sceneGroup
 
     -----------------------------------------------------
+    -- Background
+    -----------------------------------------------------
+    local backgr = display.newImageRect(
+        sceneGroup,
+        "imgs/calc_backgr.png",
+        1080,
+        1920
+    )
+    backgr.x = display.contentCenterX
+    backgr.y = display.contentCenterY
+
+    -----------------------------------------------------
     -- Display
     -----------------------------------------------------
     displayObj = Display.new(sceneGroup)
@@ -318,6 +330,7 @@ function scene:create(event)
         scale  = layout.longButtons.scale,
         x      = cx1,
         y      = cy1,
+        label = "=",
         onTap  = onEqualsPressed
     })
 
@@ -329,6 +342,7 @@ function scene:create(event)
         scale  = layout.longButtons.scale,
         x      = cx2,
         y      = cy2,
+        label = "Zufall",
         onTap = function()
             -- Zufalls-Aufgabe (Hook)
             startRandomTask()
