@@ -342,13 +342,20 @@ function scene:create(event)
         scale  = layout.longButtons.scale,
         x      = cx2,
         y      = cy2,
-        label = "Zufall",
         onTap = function()
             -- Zufalls-Aufgabe (Hook)
             startRandomTask()
         end
     })
 
+    local zufall = display.newImageRect(
+        sceneGroup,
+        "imgs/random.png",
+        576 *0.4,
+        315 *0.4
+    )
+    zufall.x = cx2 +10
+    zufall.y = cy2 +4
     -----------------------------------------------------
     -- Settings Icon (öffnet Sprach-Dropdown)
     -----------------------------------------------------

@@ -292,10 +292,10 @@ function scene:create(event)
     local arrow = display.newImageRect(
         sceneGroup,
         "imgs/arrow.png",
-        669 * 0.2,
-        267 * 0.2
+        1125 * 0.3,
+        194 * 0.5
     )
-    arrow.x = backBtn.group.x - backBtn.width * 0.15
+    arrow.x = backBtn.group.x 
     arrow.y = backBtn.group.y
 end
 

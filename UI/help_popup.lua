@@ -29,7 +29,7 @@ function HelpPopup.show(parentGroup, text)
         y        = 0,
         width    = maxWidth,
         font     = native.systemFont,
-        fontSize = 40,
+        fontSize = 70,
         align    = "center"
     })
     txt:setFillColor(1, 1, 1)
