@@ -31,7 +31,34 @@ local fixedSpawn = {
 ---------------------------------------------------------
 local marbles = {}
 local slots   = {}  -- rechte Plätze (empty_spot)
-local machine -- CounterMachine-Instanz
+local machine          -- CounterMachine-Instanz
+local segmentBarGroup  -- Gruppe für den Balken
+local counterBar       -- einzelner, voller Balken
+
+---------------------------------------------------------
+-- Balken kurz aufblinken lassen, wenn gezählt wurde
+---------------------------------------------------------
+local function blinkCounterBar()
+    if not counterBar then return end
+
+    -- evtl. laufende Animation abbrechen
+    transition.cancel(counterBar)
+
+    -- hell machen
+    counterBar:setFillColor(1, 1, 0.2)
+    counterBar.alpha = 1
+
+    -- wieder abdunkeln
+    transition.to(counterBar, {
+        time  = 200,
+        alpha = 0.7,
+        onComplete = function()
+            if counterBar then
+                counterBar:setFillColor(0.2, 0.2, 0.35)
+            end
+        end
+    })
+end
 
 ---------------------------------------------------------
 -- Slot-Helfer
@@ -123,7 +150,10 @@ local function marbleTouch(event)
             local thresholdY = display.contentHeight * 0.5
 
             if machine and areAllSlotsFilled() and target.y >= thresholdY then
-                machine:swallowMarble(target)
+                -- 🔴 hier hängen wir das Balken-Blinken dran
+                machine:swallowMarble(target, function()
+                    blinkCounterBar()
+                end)
                 return true
             else
                 -- 3. Ansonsten: zurück zum Spawnpoint
@@ -294,6 +324,31 @@ function scene:create(event)
     })
     machine:setValue(0)
 
+    
+    -----------------------------------------------------
+    -- Voller Balken unter den Rollen (nicht segmentiert)
+    -- (logisch wie Divisor = 1)
+    -----------------------------------------------------
+    segmentBarGroup = display.newGroup()
+    sceneGroup:insert(segmentBarGroup)
+
+    local bodyW = machine.body.width
+    local bodyH = machine.body.height
+
+    local barWidth  = bodyW * 0.6
+    local barHeight = bodyH * 0.08
+    local barX      = machine.group.x + bodyW * 0.1
+    local barY      = machine.group.y + bodyH * 0.36
+
+    -- Hintergrund
+    local barBg = display.newRoundedRect(segmentBarGroup, barX, barY, barWidth, barHeight, 10)
+    barBg:setFillColor(0, 0, 0, 0.6)
+
+    -- eigentlicher Balken
+    counterBar = display.newRoundedRect(segmentBarGroup, barX, barY, barWidth - 6, barHeight - 6, 8)
+    counterBar:setFillColor(0.2, 0.2, 0.35)
+    counterBar.alpha = 0.7
+
     -----------------------------------------------------
     -- Hilfe-Button (Fragezeichen oben rechts)
     -----------------------------------------------------
@@ -305,6 +360,7 @@ function scene:create(event)
         scale  = layout.helpIcon.scale,
         x      = hx,
         y      = hy,
+        playSound = false,
         onTap  = function()
             HelpPopup.show(sceneGroup, i18n.t("help_sub"))
         end
@@ -320,6 +376,7 @@ function scene:create(event)
         scale  = layout.longButtons.scale,
         x      = display.contentCenterX,
         y      = display.contentHeight - 120,
+        playSound = false,
         onTap  = function()
             composer.gotoScene("scenes.taschenrechner", {
                 effect = "slideRight",
@@ -365,6 +422,12 @@ function scene:destroy(event)
     end
     slots   = {}
     machine = nil
+
+    if segmentBarGroup and segmentBarGroup.removeSelf then
+        segmentBarGroup:removeSelf()
+    end
+    segmentBarGroup = nil
+    counterBar      = nil
 end
 
 scene:addEventListener("create", scene)

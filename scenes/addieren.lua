@@ -30,7 +30,34 @@ local fixedSpawn = {
 -- Lokale Variablen
 ---------------------------------------------------------
 local marbles = {}
-local machine  -- CounterMachine-Instanz
+local machine          -- CounterMachine-Instanz
+local segmentBarGroup  -- Gruppe für den Balken
+local counterBar       -- einzelner, voller Balken
+
+---------------------------------------------------------
+-- Balken kurz aufblinken lassen, wenn gezählt wurde
+---------------------------------------------------------
+local function blinkCounterBar()
+    if not counterBar then return end
+
+    -- evtl. laufende Animation abbrechen
+    transition.cancel(counterBar)
+
+    -- hell machen
+    counterBar:setFillColor(1, 1, 0.2)
+    counterBar.alpha = 1
+
+    -- wieder abdunkeln
+    transition.to(counterBar, {
+        time  = 200,
+        alpha = 0.7,
+        onComplete = function()
+            if counterBar then
+                counterBar:setFillColor(0.2, 0.2, 0.35)
+            end
+        end
+    })
+end
 
 ---------------------------------------------------------
 -- Touch-Listener für Murmeln
@@ -66,7 +93,10 @@ local function marbleTouch(event)
 
             if machine and target.y >= thresholdY then
                 -- weiter als die Hälfte → Maschine saugt ein
-                machine:swallowMarble(target)
+                -- 🔴 hier hängen wir das Balken-Blinken dran
+                machine:swallowMarble(target, function()
+                    blinkCounterBar()
+                end)
             else
                 -- nicht weit genug → zurück zum Spawnpoint
                 transition.to(target, {
@@ -149,8 +179,8 @@ function scene:create(event)
     local banner = display.newImageRect(
         sceneGroup,
         "imgs/banner.png",
-        788 *0.7,
-        206 *0.7
+        788 * 0.7,
+        206 * 0.7
     )
     banner.x = display.contentCenterX
     banner.y = 120
@@ -208,17 +238,42 @@ function scene:create(event)
     machine:setValue(0)
 
     -----------------------------------------------------
+    -- Voller Balken unter den Rollen (nicht segmentiert)
+    -- (logisch wie Divisor = 1)
+    -----------------------------------------------------
+    segmentBarGroup = display.newGroup()
+    sceneGroup:insert(segmentBarGroup)
+
+    local bodyW = machine.body.width
+    local bodyH = machine.body.height
+
+    local barWidth  = bodyW * 0.6
+    local barHeight = bodyH * 0.08
+    local barX      = machine.group.x + bodyW * 0.1
+    local barY      = machine.group.y + bodyH * 0.36
+
+    -- Hintergrund
+    local barBg = display.newRoundedRect(segmentBarGroup, barX, barY, barWidth, barHeight, 10)
+    barBg:setFillColor(0, 0, 0, 0.6)
+
+    -- eigentlicher Balken
+    counterBar = display.newRoundedRect(segmentBarGroup, barX, barY, barWidth - 6, barHeight - 6, 8)
+    counterBar:setFillColor(0.2, 0.2, 0.35)
+    counterBar.alpha = 0.7
+
+    -----------------------------------------------------
     -- Hilfe-Button (Fragezeichen oben rechts)
     -----------------------------------------------------
     local hx, hy = layout.toCenter(layout.helpIcon)
     Button.new(sceneGroup, {
-        image  = "imgs/questionmark.png",
-        width  = layout.helpIcon.size,
-        height = layout.helpIcon.size,
-        scale  = layout.helpIcon.scale,
-        x      = hx,
-        y      = hy,
-        onTap  = function()
+        image      = "imgs/questionmark.png",
+        width      = layout.helpIcon.size,
+        height     = layout.helpIcon.size,
+        scale      = layout.helpIcon.scale,
+        x          = hx,
+        y          = hy,
+        playSound  = false,
+        onTap      = function()
             HelpPopup.show(sceneGroup, i18n.t("help_add"))
         end
     })
@@ -227,13 +282,14 @@ function scene:create(event)
     -- Zurück-Button unten
     -----------------------------------------------------
     local backBtn = Button.new(sceneGroup, {
-        image  = "imgs/btn_long_alt.png",
-        width  = layout.longButtons.width,
-        height = layout.longButtons.height,
-        scale  = layout.longButtons.scale,
-        x      = display.contentCenterX,
-        y      = display.contentHeight - 120,
-        onTap  = function()
+        image      = "imgs/btn_long_alt.png",
+        width      = layout.longButtons.width,
+        height     = layout.longButtons.height,
+        scale      = layout.longButtons.scale,
+        x          = display.contentCenterX,
+        y          = display.contentHeight - 120,
+        playSound  = false,
+        onTap      = function()
             composer.gotoScene("scenes.taschenrechner", {
                 effect = "slideRight",
                 time   = 300,
@@ -249,7 +305,7 @@ function scene:create(event)
         1125 * 0.3,
         194 * 0.5
     )
-    arrow.x = backBtn.group.x 
+    arrow.x = backBtn.group.x
     arrow.y = backBtn.group.y
 end
 
@@ -268,7 +324,14 @@ function scene:destroy(event)
         marbles[i] = nil
     end
     marbles = {}
+
     machine = nil
+
+    if segmentBarGroup and segmentBarGroup.removeSelf then
+        segmentBarGroup:removeSelf()
+    end
+    segmentBarGroup = nil
+    counterBar      = nil
 end
 
 scene:addEventListener("create", scene)

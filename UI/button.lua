@@ -1,22 +1,25 @@
 -- ui/button.lua
 -- Generischer Button mit optionalem Text-Label
 
+local Sound = require("sound")  -- 🔊 Soundmodul einbinden
+
 local Button = {}
 Button.__index = Button
 
 -- parentGroup: Anzeigegruppe, in die der Button eingesetzt wird
 -- opts:
---   image      = Pfad zur Button-Grafik
---   width      = Basisbreite des Bildes
---   height     = Basishöhe des Bildes
---   scale      = Skalierungsfaktor (optional, default 1)
---   x, y       = Position des Button-Gruppenmittelpunkts
---   onTap      = Callback-Funktion bei Tap
---   label      = optionaler Text auf dem Button
---   font       = Schriftart (optional)
---   fontSize   = Schriftgröße (optional)
+--   image        = Pfad zur Button-Grafik
+--   width        = Basisbreite des Bildes
+--   height       = Basishöhe des Bildes
+--   scale        = Skalierungsfaktor (optional, default 1)
+--   x, y         = Position des Button-Gruppenmittelpunkts
+--   onTap        = Callback-Funktion bei Tap
+--   label        = optionaler Text auf dem Button
+--   font         = Schriftart (optional)
+--   fontSize     = Schriftgröße (optional)
 --   labelOffsetY = vertikaler Offset fürs Label (optional)
---   labelColor = {r,g,b} (optional)
+--   labelColor   = {r,g,b} (optional)
+--   playSound    = true/false (optional, default true)
 function Button.new(parentGroup, opts)
     opts = opts or {}
 
@@ -80,10 +83,17 @@ function Button.new(parentGroup, opts)
     -- Tap-Interaktion (einfach & zuverlässig)
     ----------------------------------------------------
     if opts.onTap then
+        -- Standard: Sound abspielen, außer explizit deaktiviert
+        local playSound = (opts.playSound ~= false)
+
         local function onTap(event)
+            if playSound then
+                Sound.playKeyBeep()
+            end
             opts.onTap()
             return true
         end
+
         img:addEventListener("tap", onTap)
         self._tapListener = onTap
     end

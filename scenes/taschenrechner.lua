@@ -331,6 +331,7 @@ function scene:create(event)
         x      = cx1,
         y      = cy1,
         label = "=",
+        playSound = false,
         onTap  = onEqualsPressed
     })
 
@@ -342,6 +343,7 @@ function scene:create(event)
         scale  = layout.longButtons.scale,
         x      = cx2,
         y      = cy2,
+        playSound = false,
         onTap = function()
             -- Zufalls-Aufgabe (Hook)
             startRandomTask()
@@ -367,6 +369,7 @@ function scene:create(event)
         scale  = layout.settingsIcon.scale,
         x      = sx,
         y      = sy,
+        playSound = false,
         onTap = function()
             LangMenu.toggle(sceneGroup, sx, sy)
         end
@@ -383,6 +386,7 @@ function scene:create(event)
         scale  = layout.helpIcon.scale,
         x      = hx,
         y      = hy,
+        playSound = false,
         onTap = function()
             HelpPopup.show(sceneGroupRef, i18n.t("help_calculator"))
         end

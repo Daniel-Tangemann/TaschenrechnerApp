@@ -381,6 +381,7 @@ function scene:create(event)
         scale  = layout.helpIcon.scale,
         x      = hx,
         y      = hy,
+        playSound = false,
         onTap  = function()
             HelpPopup.show(sceneGroup, i18n.t("help_div"))
         end
@@ -396,6 +397,7 @@ function scene:create(event)
         scale  = layout.longButtons.scale,
         x      = display.contentCenterX,
         y      = display.contentHeight - 120,
+        playSound = false,
         onTap  = function()
             composer.gotoScene("scenes.taschenrechner", {
                 effect = "slideRight",

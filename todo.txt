@@ -6,7 +6,7 @@ ToDo:
 - Ton beim Tastendruck -done (key_beep.wav)
 - Spritesheet für counter_machine -done (LED_spritesheet.png)
 - Assets für Num-Hint erstellen (v.a. die Zahl rechts ist nicht immer eindeutig erkennbar) -done (num_hints.png)
-- Spritesheet für Multiplikator
+- Spritesheet für Multiplikator -done (Multiplikator_Spritesheet.png)
 - Feuerwerk Animation erstellen
 - Hand-Animationen für Minispiele
 ---code---

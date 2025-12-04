@@ -25,23 +25,68 @@ local fixedSpawn = {
 ---------------------------------------------------------
 local marbles       = {}
 local machine       -- CounterMachine-Instanz
-local cloneDevice   -- display-Objekt der Klonmaschine
+local clonerSprite  -- komplette Klonmaschine als Sprite
 local cloneCenterX, cloneCenterY  -- Funnel-Zentrum
 local multiplier = 1   -- rechte Zahl (Faktor)
 
+-- Balken unter der Maschine
+local segmentBarGroup
+local counterBar
+
+---------------------------------------------------------
+-- Klonmaschinen-Sprite: idle / beam
+---------------------------------------------------------
+local function setClonerBeamActive(active)
+    if not clonerSprite then return end
+    if active then
+        clonerSprite:setFrame(2)  -- Strahl-Frame
+    else
+        clonerSprite:setFrame(1)  -- Idle-Frame
+    end
+end
+
+---------------------------------------------------------
+-- Balken kurz aufblinken lassen, wenn gezählt wurde
+-- + gleichzeitig Klonmaschine-Strahl aktivieren
+---------------------------------------------------------
+local function blinkCounterBar()
+    if not counterBar then return end
+
+    transition.cancel(counterBar)
+
+    -- Strahl an
+    setClonerBeamActive(true)
+
+    counterBar:setFillColor(1, 1, 0.2)
+    counterBar.alpha = 1
+
+    transition.to(counterBar, {
+        time  = 200,
+        alpha = 0.7,
+        onComplete = function()
+            if counterBar then
+                counterBar:setFillColor(0.2, 0.2, 0.35)
+            end
+            -- Strahl wieder aus
+            setClonerBeamActive(false)
+        end
+    })
+end
+
 ---------------------------------------------------------
 -- Murmel in Klonmaschine "einsaugen" und Klone zählen
+-- onDone: optionaler Callback (z.B. Balken+Strahl)
 ---------------------------------------------------------
-local function swallowIntoCloner(marble)
+local function swallowIntoCloner(marble, onDone)
     if not marble or marble.removed then
         return
     end
     marble.removed = true
 
     transition.to(marble, {
-        time   = 180,         -- ✏️ ggf. Geschwindigkeit der Einsaug-Animation anpassen
+        time   = 180,
         x      = cloneCenterX,
-        y      = cloneCenterY - 40,   -- ✏️ vertikaler Offset im Trichter
+        y      = cloneCenterY - 40,
         xScale = 0.3,
         yScale = 0.3,
         alpha  = 0.0,
@@ -50,11 +95,14 @@ local function swallowIntoCloner(marble)
                 marble:removeSelf()
             end
 
-            -- Jede Murmel erzeugt "multiplier" Klone → so oft increment
             if machine and multiplier > 0 then
                 for i = 1, multiplier do
                     machine:increment()
                 end
+            end
+
+            if onDone then
+                onDone()
             end
         end
     })
@@ -85,7 +133,7 @@ local function marbleTouch(event)
             display.getCurrentStage():setFocus(nil)
             target.isFocus = false
 
-            -- Spawn fallback
+            -- Sicherheitsnetz
             target.spawnX = target.spawnX or target.x
             target.spawnY = target.spawnY or target.y
 
@@ -93,12 +141,11 @@ local function marbleTouch(event)
             local dx = target.x - cloneCenterX
             local dy = target.y - cloneCenterY
             local dist2 = dx*dx + dy*dy
-
-            local radius = 260       -- ✏️ Größe der Fangzone rund um den Trichter
+            local radius = 260   -- Fangradius
 
             if dist2 <= radius * radius then
-                -- In die Maschine
-                swallowIntoCloner(target)
+                -- In die Maschine + Balken/Strahl
+                swallowIntoCloner(target, blinkCounterBar)
             else
                 -- Zurück zum Spawn
                 transition.to(target, {
@@ -127,7 +174,7 @@ local function spawnMarbles(sceneGroup, num, containerRect)
         local m = display.newImageRect(
             sceneGroup,
             "imgs/marble.png",
-            264 * 0.6,   -- ✏️ Murmelgröße
+            264 * 0.6,
             266 * 0.6
         )
 
@@ -178,8 +225,8 @@ function scene:create(event)
     local banner = display.newImageRect(
         sceneGroup,
         "imgs/banner.png",
-        788 *0.7,
-        206 *0.7
+        788 * 0.7,
+        206 * 0.7
     )
     banner.x = display.contentCenterX
     banner.y = 120
@@ -190,7 +237,7 @@ function scene:create(event)
         x        = banner.x,
         y        = banner.y,
         font     = native.systemFontBold,
-        fontSize = 72   -- ✏️ Titelgröße
+        fontSize = 72
     })
 
     -----------------------------------------------------
@@ -226,45 +273,83 @@ function scene:create(event)
     spawnMarbles(sceneGroup, leftValue, leftRect)
 
     -----------------------------------------------------
-    -- Klonmaschine im rechten Bereich
+    -- Klonmaschine als Sprite (Multiplikator_Spritesheet)
+    -- Sheet: 800 x 640, 2 Frames nebeneinander → 400 x 640 pro Frame
     -----------------------------------------------------
-    local clonerScale = 0.55   -- ✏️ Gesamtgröße der Klonmaschine
+    local clonerSheetOptions = {
+        width              = 400,
+        height             = 640,
+        numFrames          = 2,
+        sheetContentWidth  = 800,
+        sheetContentHeight = 640,
+    }
+    local clonerSheet = graphics.newImageSheet("imgs/Multiplikator_Spritesheet.png", clonerSheetOptions)
 
-    cloneDevice = display.newImageRect(
-        sceneGroup,
-        "imgs/clonedevice.png",
-        898 * clonerScale,
-        1188 * clonerScale
-    )
-    cloneDevice.x = rightRect.x
-    cloneDevice.y = rightRect.y + 40
+    clonerSprite = display.newSprite(sceneGroup, clonerSheet, {
+        name  = "all",
+        start = 1,
+        count = 2,
+        time  = 0
+    })
+    clonerSprite:setFrame(1)  -- idle
 
-    -- Funnel-Zentrum: etwas links der Maschine, leicht oberhalb der Mitte
-    cloneCenterX = cloneDevice.x - cloneDevice.width * 0.35  -- ✏️ horizontale Funnel-Position
-    cloneCenterY = cloneDevice.y - cloneDevice.height * 0.10 -- ✏️ vertikale Funnel-Position
+    -- Skalierung an rechten Bereich anpassen
+    local targetHeight = areaHeightTop * 0.9
+    local scale = targetHeight / 640
+    clonerSprite.xScale = scale
+    clonerSprite.yScale = scale
+
+    clonerSprite.x = rightRect.x
+    clonerSprite.y = rightRect.y + 40
+
+    -- Funnel-Zentrum relativ zum Sprite (Feintuning evtl. nötig)
+    cloneCenterX = clonerSprite.x - clonerSprite.width * 0.25
+    cloneCenterY = clonerSprite.y - clonerSprite.height * 0.10
 
     -----------------------------------------------------
     -- Zählmaschine unten
     -----------------------------------------------------
     machine = CounterMachine.new(sceneGroup, {
         x     = display.contentCenterX,
-        y     = display.contentHeight * 0.72,  -- ✏️ vertikale Position der Zählmaschine
-        scale = 0.8                            -- ✏️ Größe der Zählmaschine
+        y     = display.contentHeight * 0.72,
+        scale = 0.8
     })
     machine:setValue(0)
+
+    -----------------------------------------------------
+    -- Voller Balken unter den Rollen (wie Divisor = 1)
+    -----------------------------------------------------
+    segmentBarGroup = display.newGroup()
+    sceneGroup:insert(segmentBarGroup)
+
+    local bodyW = machine.body.width
+    local bodyH = machine.body.height
+
+    local barWidth  = bodyW * 0.6
+    local barHeight = bodyH * 0.08
+    local barX      = machine.group.x + bodyW * 0.1
+    local barY      = machine.group.y + bodyH * 0.36
+
+    local barBg = display.newRoundedRect(segmentBarGroup, barX, barY, barWidth, barHeight, 10)
+    barBg:setFillColor(0, 0, 0, 0.6)
+
+    counterBar = display.newRoundedRect(segmentBarGroup, barX, barY, barWidth - 6, barHeight - 6, 8)
+    counterBar:setFillColor(0.2, 0.2, 0.35)
+    counterBar.alpha = 0.7
 
     -----------------------------------------------------
     -- Hilfe-Button (Fragezeichen oben rechts)
     -----------------------------------------------------
     local hx, hy = layout.toCenter(layout.helpIcon)
     Button.new(sceneGroup, {
-        image  = "imgs/questionmark.png",
-        width  = layout.helpIcon.size,
-        height = layout.helpIcon.size,
-        scale  = layout.helpIcon.scale,
-        x      = hx,
-        y      = hy,
-        onTap  = function()
+        image      = "imgs/questionmark.png",
+        width      = layout.helpIcon.size,
+        height     = layout.helpIcon.size,
+        scale      = layout.helpIcon.scale,
+        x          = hx,
+        y          = hy,
+        playSound  = false,
+        onTap      = function()
             HelpPopup.show(sceneGroup, i18n.t("help_mul"))
         end
     })
@@ -273,13 +358,14 @@ function scene:create(event)
     -- Zurück-Button unten
     -----------------------------------------------------
     local backBtn = Button.new(sceneGroup, {
-        image  = "imgs/btn_long_alt.png",
-        width  = layout.longButtons.width,
-        height = layout.longButtons.height,
-        scale  = layout.longButtons.scale,
-        x      = display.contentCenterX,
-        y      = display.contentHeight - 120,
-        onTap  = function()
+        image      = "imgs/btn_long_alt.png",
+        width      = layout.longButtons.width,
+        height     = layout.longButtons.height,
+        scale      = layout.longButtons.scale,
+        x          = display.contentCenterX,
+        y          = display.contentHeight - 120,
+        playSound  = false,
+        onTap      = function()
             composer.gotoScene("scenes.taschenrechner", {
                 effect = "slideRight",
                 time   = 300,
@@ -295,7 +381,7 @@ function scene:create(event)
         1125 * 0.3,
         194 * 0.5
     )
-    arrow.x = backBtn.group.x 
+    arrow.x = backBtn.group.x
     arrow.y = backBtn.group.y
 end
 
@@ -314,8 +400,15 @@ function scene:destroy(event)
         marbles[i] = nil
     end
     marbles = {}
-    machine = nil
-    cloneDevice = nil
+
+    machine      = nil
+    clonerSprite = nil
+
+    if segmentBarGroup and segmentBarGroup.removeSelf then
+        segmentBarGroup:removeSelf()
+    end
+    segmentBarGroup = nil
+    counterBar      = nil
 end
 
 scene:addEventListener("create", scene)
