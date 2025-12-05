@@ -18,7 +18,6 @@ local numHintSheetOptions = {
 }
 local numHintSheet = graphics.newImageSheet("imgs/num_hints.png", numHintSheetOptions)
 
--- Referenzen für die beiden Zahlensprites
 local numHintLeft
 local numHintRight
 
@@ -89,6 +88,10 @@ local multiplier = 1   -- rechte Zahl (Faktor)
 local segmentBarGroup
 local counterBar
 
+-- Beam-Loop-Animation
+local clonerAnimTimer      = nil
+local clonerAnimLoopActive = false
+
 ---------------------------------------------------------
 -- Klonmaschinen-Sprite: idle / beam
 ---------------------------------------------------------
@@ -101,17 +104,58 @@ local function setClonerBeamActive(active)
     end
 end
 
+local function stopClonerBeamLoop()
+    if clonerAnimTimer then
+        timer.cancel(clonerAnimTimer)
+        clonerAnimTimer = nil
+    end
+    clonerAnimLoopActive = false
+    setClonerBeamActive(false)
+end
+
+local function startClonerBeamLoop(totalSteps, stepDelay)
+    stopClonerBeamLoop()
+
+    if not clonerSprite then return end
+    if not totalSteps or totalSteps <= 0 then return end
+
+    clonerAnimLoopActive = true
+    local steps  = 0
+    local delay  = stepDelay or 40
+
+    clonerAnimTimer = timer.performWithDelay(delay, function(e)
+        if not clonerSprite then
+            stopClonerBeamLoop()
+            return
+        end
+
+        -- Idle ↔ Strahl toggeln
+        if clonerSprite.frame == 1 then
+            clonerSprite:setFrame(2)
+        else
+            clonerSprite:setFrame(1)
+        end
+
+        steps = steps + 1
+        if steps >= totalSteps then
+            stopClonerBeamLoop()
+        end
+    end, 0)
+end
+
 ---------------------------------------------------------
 -- Balken kurz aufblinken lassen, wenn gezählt wurde
--- + gleichzeitig Klonmaschine-Strahl aktivieren
+-- (Beam wird nur beeinflusst, wenn keine Loop läuft)
 ---------------------------------------------------------
 local function blinkCounterBar()
     if not counterBar then return end
 
     transition.cancel(counterBar)
 
-    -- Strahl an
-    setClonerBeamActive(true)
+    -- nur kurz Strahl an/aus, wenn gerade keine Dauer-Loop läuft
+    if not clonerAnimLoopActive then
+        setClonerBeamActive(true)
+    end
 
     counterBar:setFillColor(1, 1, 0.2)
     counterBar.alpha = 1
@@ -123,17 +167,16 @@ local function blinkCounterBar()
             if counterBar then
                 counterBar:setFillColor(0.2, 0.2, 0.35)
             end
-            -- Strahl wieder aus
-            setClonerBeamActive(false)
+            if not clonerAnimLoopActive then
+                setClonerBeamActive(false)
+            end
         end
     })
 end
 
 ---------------------------------------------------------
--- Murmel in Klonmaschine "einsaugen" und Klone zählen
--- onDone: optionaler Callback (z.B. Balken+Strahl)
---
--- NEU: nutzt marble.countValue * multiplier
+-- Murmel in Klonmaschine "einsaugen" und Produkt zählen
+-- onDone: optionaler Callback (z.B. Balken)
 ---------------------------------------------------------
 local function swallowIntoCloner(marble, onDone)
     if not marble or marble.removed then
@@ -154,11 +197,24 @@ local function swallowIntoCloner(marble, onDone)
             end
 
             if machine and multiplier > 0 then
-                local baseValue = tonumber(marble.countValue) or 1
-                if baseValue < 1 then baseValue = 1 end
-                local amount = baseValue * multiplier
-                for i = 1, amount do
-                    machine:increment()
+                local baseValue = marble.countValue or 1
+                if baseValue < 0 then baseValue = 0 end
+                local total = baseValue * multiplier
+
+                if total > 0 then
+                    local stepDelay = 40
+
+                    -- Beam-Loop für die gesamte Zählzeit starten
+                    startClonerBeamLoop(total, stepDelay)
+
+                    if machine.incrementMany then
+                        machine:incrementMany(total, stepDelay)
+                    else
+                        -- Fallback: alles “auf einen Schlag”
+                        for _ = 1, total do
+                            machine:increment()
+                        end
+                    end
                 end
             end
 
@@ -170,7 +226,7 @@ local function swallowIntoCloner(marble, onDone)
 end
 
 ---------------------------------------------------------
--- Touch-Listener für Murmeln
+-- Touch-Listener für Murmeln (drag in die Klonmaschine)
 ---------------------------------------------------------
 local function marbleTouch(event)
     local target = event.target
@@ -225,14 +281,52 @@ local function marbleTouch(event)
 end
 
 ---------------------------------------------------------
--- Murmeln erzeugen (links; Bündelung + Farbcodierung)
+-- Double-Tap-Handler:
+-- schickt alle Murmeln im Radius in die Klonmaschine
+---------------------------------------------------------
+local function makeDoubleTapHandler(radius)
+    local lastTapTime = 0
+    local doubleTapThreshold = 250  -- ms
+
+    return function(event)
+        local now = system.getTimer()
+        local isDouble = (now - lastTapTime) <= doubleTapThreshold
+        lastTapTime = now
+
+        if not isDouble then
+            return true
+        end
+
+        if not machine then
+            return true
+        end
+
+        local tapX, tapY = event.x, event.y
+        local r2 = radius * radius
+
+        for _, m in ipairs(marbles) do
+            if m and not m.removed and m.side == "left" then
+                local dx = m.x - tapX
+                local dy = m.y - tapY
+                local dist2 = dx*dx + dy*dy
+                if dist2 <= r2 then
+                    swallowIntoCloner(m, blinkCounterBar)
+                end
+            end
+        end
+
+        return true
+    end
+end
+
+---------------------------------------------------------
+-- Murmeln erzeugen (links, mit Bündel-Murmel + Farben)
 ---------------------------------------------------------
 local function spawnMarbles(sceneGroup, num, containerRect)
     local list = fixedSpawn.left or {}
     local maxFixed = #list
 
-    -- Helper zum Erzeugen einer farbigen Murmel mit Wert
-    local function createColoredMarble(x, y, color, countValue)
+    local function createColoredMarble(x, y, color, countValue, isBundle)
         local m = display.newImageRect(
             sceneGroup,
             "imgs/grey_marble.png",
@@ -244,9 +338,9 @@ local function spawnMarbles(sceneGroup, num, containerRect)
         m.spawnX = x
         m.spawnY = y
         m.removed = false
-
-        -- wie viel die Murmel beim Zählen wert ist
+        m.side    = "left"
         m.countValue = countValue or 1
+        m.isBundle   = isBundle or false
 
         if color then
             m:setFillColor(color[1], color[2], color[3])
@@ -257,25 +351,25 @@ local function spawnMarbles(sceneGroup, num, containerRect)
         return m
     end
 
-    -- Zahl in Einer + eine „Bündel“-Murmel auf Position 10 zerlegen
+    -- Zahl in Einer + eine „Bündel“-Murmel auf Position 10
     local ones      = num % 10
     local tensColor = getTensColorForValue(num)
 
-    -- Einer-Murmeln: Positionen 1..9 (falls vorhanden)
+    -- Einer-Murmeln (immer Wert 1): Positionen 1..9
     local numOnes = math.min(ones, math.max(0, maxFixed - 1))
     for i = 1, numOnes do
         local pos = list[i]
-        createColoredMarble(pos[1], pos[2], marbleColors.ones, 1)
+        createColoredMarble(pos[1], pos[2], marbleColors.ones, 1, false)
     end
 
     -- Bündel-Murmel auf Position 10, falls num >= 10
     if tensColor and maxFixed >= 10 then
         local pos       = list[10]
-        local tensValue = num - ones  -- z.B. 23 → 20
+        local tensValue = num - ones  -- z.B. 24 → 20
         if tensValue < 1 then
             tensValue = 1
         end
-        createColoredMarble(pos[1], pos[2], tensColor, tensValue)
+        createColoredMarble(pos[1], pos[2], tensColor, tensValue, true)
     end
 end
 
@@ -288,7 +382,6 @@ function scene:create(event)
     local leftValue  = params.left  or 3
     local rightValue = params.right or 4
     multiplier       = rightValue or 1
-    if multiplier < 1 then multiplier = 1 end
 
     -----------------------------------------------------
     -- Background
@@ -351,7 +444,7 @@ function scene:create(event)
     rightRect:setFillColor(0.1, 0.15, 0.3, 0.85)
 
     -----------------------------------------------------
-    -- Num-Hints (Zahlen 0..99 über den Bereichen, statisch)
+    -- Num-Hints über den Bereichen
     -----------------------------------------------------
     local function clampToHintRange(v)
         if v < 0 then return 0 end
@@ -362,7 +455,6 @@ function scene:create(event)
     local leftFrame  = clampToHintRange(leftValue)  + 1
     local rightFrame = clampToHintRange(rightValue) + 1
 
-    -- linke Zahl (Multiplikand)
     numHintLeft = display.newSprite(sceneGroup, numHintSheet, { start = leftFrame, count = 1 })
     numHintLeft.x = leftRect.x
     numHintLeft.y = leftRect.y - (areaHeightTop * 0.5) - 40
@@ -370,7 +462,6 @@ function scene:create(event)
     numHintLeft.yScale = 1.6
     numHintLeft:setFrame(leftFrame)
 
-    -- rechte Zahl (Multiplikator)
     numHintRight = display.newSprite(sceneGroup, numHintSheet, { start = rightFrame, count = 1 })
     numHintRight.x = rightRect.x
     numHintRight.y = rightRect.y - (areaHeightTop * 0.5) - 40
@@ -379,7 +470,14 @@ function scene:create(event)
     numHintRight:setFrame(rightFrame)
 
     -----------------------------------------------------
-    -- Murmeln links spawnen (mit Farbkodierung + Wert)
+    -- Double-Tap: auf linkem Bereich UND linkem Num-Hint
+    -----------------------------------------------------
+    local tapRadius = 1000
+    leftRect:addEventListener("tap", makeDoubleTapHandler(tapRadius))
+    numHintLeft:addEventListener("tap", makeDoubleTapHandler(tapRadius))
+
+    -----------------------------------------------------
+    -- Murmeln links spawnen
     -----------------------------------------------------
     spawnMarbles(sceneGroup, leftValue, leftRect)
 
@@ -413,7 +511,7 @@ function scene:create(event)
     clonerSprite.x = rightRect.x
     clonerSprite.y = rightRect.y + 40
 
-    -- Funnel-Zentrum relativ zum Sprite (Feintuning evtl. nötig)
+    -- Funnel-Zentrum relativ zum Sprite (Feintuning bei Bedarf)
     cloneCenterX = clonerSprite.x - clonerSprite.width * 0.25
     cloneCenterY = clonerSprite.y - clonerSprite.height * 0.10
 
@@ -518,6 +616,8 @@ function scene:hide(event)
 end
 
 function scene:destroy(event)
+    stopClonerBeamLoop()
+
     for i = #marbles, 1, -1 do
         local m = marbles[i]
         if m.removeSelf then

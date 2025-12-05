@@ -29,7 +29,7 @@ local marbleColors = {
     ones      = {  9/255,   32.9/255,  91/255 },   -- Einer
     tens      = {  9/255,   87.5/255,  91/255 },   -- Zehner (10–19)
     twenties  = {  9/255,   91/255,    36.5/255 }, -- Zwanziger (20–29)
-    thirties  = { 45.1/255, 91/255,    9/255 },    -- Dreißiger (30–39) → B ergänzt
+    thirties  = { 45.1/255, 91/255,    9/255 },    -- Dreißiger (30–39)
     forties   = { 70.6/255, 91/255,    9/255 },    -- Vierziger (40–49)
     fifties   = { 91/255,   91/255,    9/255 },    -- Fünfziger (50–59)
     sixties   = { 89/255,   64.3/255,  9/255 },    -- Sechziger (60–69)
@@ -170,15 +170,59 @@ local function marbleTouch(event)
 end
 
 ---------------------------------------------------------
+-- Double-Tap-Handler-Factory
+-- side: "left" oder "right"
+-- radius: Suchradius um Tap-Punkt
+-- Double-Tap auf:
+--   * Bereich → lokaler Radius
+--   * Num-Hint → großer Radius ("fast alle" Murmeln der Seite)
+---------------------------------------------------------
+local function makeDoubleTapHandler(side, radius)
+    local lastTapTime = 0
+    local doubleTapThreshold = 250  -- ms
+
+    return function(event)
+        local now = system.getTimer()
+        local isDouble = (now - lastTapTime) <= doubleTapThreshold
+        lastTapTime = now
+
+        if not isDouble then
+            return true
+        end
+
+        if not machine then
+            return true
+        end
+
+        local tapX, tapY = event.x, event.y
+        local r2 = radius * radius
+
+        for _, m in ipairs(marbles) do
+            if m and not m.removed and not m.locked and m.side == side then
+                local dx = m.x - tapX
+                local dy = m.y - tapY
+                local dist2 = dx*dx + dy*dy
+                if dist2 <= r2 then
+                    machine:swallowMarble(m, function()
+                        blinkCounterBar()
+                    end)
+                end
+            end
+        end
+
+        return true
+    end
+end
+
+---------------------------------------------------------
 -- Murmeln erzeugen
 -- side = "left" oder "right"
--- Links: Einer + eine „Bündel“-Murmel (10er, 20er, …) auf Position 10
--- Rechts: normale Einer-Murmeln
+-- Mit Farbkodierung + countValue für korrektes Rechnen
 ---------------------------------------------------------
 local function spawnMarbles(sceneGroup, num, containerRect, side)
     local list = fixedSpawn[side] or {}
+    local maxFixed = #list
 
-    -- Helper zum Erzeugen einer farbigen Murmel mit Wert
     local function createColoredMarble(x, y, color, countValue)
         local m = display.newImageRect(
             sceneGroup,
@@ -186,12 +230,13 @@ local function spawnMarbles(sceneGroup, num, containerRect, side)
             264 * 0.6,
             266 * 0.6
         )
+
         m.x, m.y = x, y
         m.spawnX = x
         m.spawnY = y
         m.removed = false
-
-        -- wie viel die Murmel wert ist (für den Counter)
+        m.locked  = false
+        m.side    = side
         m.countValue = countValue or 1
 
         if color then
@@ -204,19 +249,18 @@ local function spawnMarbles(sceneGroup, num, containerRect, side)
     end
 
     if side == "left" then
-        -- Zahl in Einer + eine Bündel-Murmel zerlegen
-        local ones = num % 10
+        -- Zahl in Einer + eine „Bündel“-Murmel auf Position 10
+        local ones      = num % 10
         local tensColor = getTensColorForValue(num)
-        local maxFixed = #list -- sollte 10 sein
 
-        -- Einer-Murmeln: Positionen 1..9 (je 1 Wert)
+        -- Einer-Murmeln: Positionen 1..9
         local numOnes = math.min(ones, math.max(0, maxFixed - 1))
         for i = 1, numOnes do
             local pos = list[i]
             createColoredMarble(pos[1], pos[2], marbleColors.ones, 1)
         end
 
-        -- Größenordnungs-Murmel auf Position 10, falls num >= 10
+        -- Bündel-Murmel auf Position 10, falls num >= 10
         if tensColor and maxFixed >= 10 then
             local pos       = list[10]
             local tensValue = num - ones  -- z.B. 23 → 20
@@ -225,24 +269,19 @@ local function spawnMarbles(sceneGroup, num, containerRect, side)
             end
             createColoredMarble(pos[1], pos[2], tensColor, tensValue)
         end
-
     else
-        -- Rechts: einfache Einer-Murmeln mit Wert 1
-        local maxFixed = #list
-        local count = math.min(num, maxFixed)
-
-        -- Auf den festen Positionen
-        for i = 1, count do
-            local pos = list[i]
-            createColoredMarble(pos[1], pos[2], marbleColors.ones, 1)
-        end
-
-        -- Falls es doch mehr werden sollte: in den Bereich streuen
-        for i = maxFixed + 1, num do
-            local halfW = containerRect.width * 0.5 - 40
-            local halfH = containerRect.height * 0.5 - 40
-            local x = containerRect.x + math.random(-halfW, halfW)
-            local y = containerRect.y + math.random(-halfH, halfH)
+        -- Rechte Seite: nur Einer-Murmeln (alle Wert 1)
+        for i = 1, num do
+            local x, y
+            if i <= maxFixed then
+                local pos = list[i]
+                x, y = pos[1], pos[2]
+            else
+                local halfW = containerRect.width * 0.5 - 40
+                local halfH = containerRect.height * 0.5 - 40
+                x = containerRect.x + math.random(-halfW, halfW)
+                y = containerRect.y + math.random(-halfH, halfH)
+            end
             createColoredMarble(x, y, marbleColors.ones, 1)
         end
     end
@@ -345,7 +384,7 @@ function scene:create(event)
     rightRect:setFillColor(0.1, 0.15, 0.3, 0.85)
 
     -----------------------------------------------------
-    -- Num-Hints (Zahlen 0..99 über den Murmel-Bereichen, statisch)
+    -- Num-Hints (Zahlen 0..99 über den Bereichen, statisch)
     -----------------------------------------------------
     local function clampToHintRange(v)
         if v < 0 then return 0 end
@@ -353,7 +392,7 @@ function scene:create(event)
         return v
     end
 
-    local leftFrame  = clampToHintRange(leftValue)  + 1  -- +1 weil Frames bei 1 anfangen
+    local leftFrame  = clampToHintRange(leftValue)  + 1
     local rightFrame = clampToHintRange(rightValue) + 1
 
     -- linke Zahl
@@ -373,7 +412,21 @@ function scene:create(event)
     numHintRight:setFrame(rightFrame)
 
     -----------------------------------------------------
-    -- Murmeln oben spawnen (mit Farbkodierung + Wert)
+    -- Double-Tap-Listener für Bereiche + Num-Hints
+    -- Bereich: kleiner Radius (lokale Gruppe)
+    -- Num-Hint: großer Radius (praktisch alle)
+    -----------------------------------------------------
+    local areaRadius   = 220
+    local hintRadius   = 1000
+
+    leftRect:addEventListener("tap",  makeDoubleTapHandler("left",  areaRadius))
+    rightRect:addEventListener("tap", makeDoubleTapHandler("right", areaRadius))
+
+    numHintLeft:addEventListener("tap",  makeDoubleTapHandler("left",  hintRadius))
+    numHintRight:addEventListener("tap", makeDoubleTapHandler("right", hintRadius))
+
+    -----------------------------------------------------
+    -- Murmeln oben spawnen (links & rechts)
     -----------------------------------------------------
     spawnMarbles(sceneGroup, leftValue,  leftRect,  "left")
     spawnMarbles(sceneGroup, rightValue, rightRect, "right")
@@ -484,7 +537,6 @@ function scene:destroy(event)
     segmentBarGroup = nil
     counterBar      = nil
 
-    -- Referenzen auf Num-Hints aufräumen (Sprites hängen im sceneGroup)
     numHintLeft  = nil
     numHintRight = nil
 end

@@ -7,7 +7,7 @@ ToDo:
 - Standardpositionen anpassen -done
 - Swipe-Hints hinzufügen -done
 - num_hints hinzufügen -done
-- farbige Murmeln
-- falsches rechnen verhindern
+- farbige Murmeln -done
+- falsches rechnen verhindern -done
 - erkennen wenn die Aufgabe gelöst ist -> Screen mit der Vollständigen Aufgabe (z.B. 2 + 3 = 5), Feuerwerk Animation im Hintergrund
 - double tap auf Zahlenfeld bewegt mehrere Murmeln auf einmal in den Counter (bzw. da hin wo man sonst die Murmeln ziehen würde)

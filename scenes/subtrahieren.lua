@@ -18,7 +18,6 @@ local numHintSheetOptions = {
 }
 local numHintSheet = graphics.newImageSheet("imgs/num_hints.png", numHintSheetOptions)
 
--- Referenzen für die beiden Zahlensprites
 local numHintLeft
 local numHintRight
 
@@ -38,11 +37,7 @@ local marbleColors = {
     nineties  = { 65.9/255, 33.3/255, 76.5/255 },  -- Neunziger (90–99)
 }
 
-local darkerOnesColor = {
-    marbleColors.ones[1] * 0.6,
-    marbleColors.ones[2] * 0.6,
-    marbleColors.ones[3] * 0.6,
-}
+local spawnMarbleColor = { 0.05, 0.10, 0.25 }       -- dunkleres Blau für Spawn-Murmeln
 
 local function getTensColorForValue(v)
     if v < 10 then return nil end
@@ -98,11 +93,6 @@ local segmentBarGroup  -- Gruppe für den Balken
 local counterBar       -- einzelner, voller Balken
 
 ---------------------------------------------------------
--- Vorwärtsdeklaration für Bundle-Tap (wird unten definiert)
----------------------------------------------------------
-local onBundleTap
-
----------------------------------------------------------
 -- Balken kurz aufblinken lassen, wenn gezählt wurde
 ---------------------------------------------------------
 local function blinkCounterBar()
@@ -156,6 +146,65 @@ local function findNearestFreeSlot(x, y)
 end
 
 ---------------------------------------------------------
+-- Eine Einer-Murmel aus einer Bündel-Murmel spawnen
+-- (max. 9 Spawn-Murmeln pro Bündel, und nur solange
+--  noch "remainingValue" vorhanden ist)
+---------------------------------------------------------
+local function spawnOneFromBundle(bundleMarble)
+    if not bundleMarble or bundleMarble.removed then
+        return
+    end
+
+    bundleMarble.spawnedOnes    = bundleMarble.spawnedOnes or 0
+    bundleMarble.remainingValue = bundleMarble.remainingValue or bundleMarble.totalValue or 0
+
+    -- wenn kein Wert mehr übrig ist, nichts mehr spawnen
+    if bundleMarble.remainingValue <= 0 then
+        return
+    end
+
+    -- Hard-Limit 9 Spawn-Murmeln (wie vorher)
+    if bundleMarble.spawnedOnes >= 9 then
+        return
+    end
+
+    bundleMarble.spawnedOnes    = bundleMarble.spawnedOnes + 1
+    bundleMarble.remainingValue = bundleMarble.remainingValue - 1
+
+    local parent = bundleMarble.parent
+    if not parent then return end
+
+    local m = display.newImageRect(
+        parent,
+        "imgs/grey_marble.png",
+        264 * 0.6,
+        266 * 0.6
+    )
+
+    -- in der Nähe der Bündel-Murmel spawnen
+    local dx = math.random(-40, 40)
+    local dy = math.random(30, 80)
+
+    m.x = bundleMarble.x + dx
+    m.y = bundleMarble.y + dy
+
+    m.spawnX  = m.x
+    m.spawnY  = m.y
+    m.removed = false
+    m.locked  = false
+    m.side    = "left"
+    m.countValue = 1  -- zählt als 1
+
+    m:setFillColor(spawnMarbleColor[1], spawnMarbleColor[2], spawnMarbleColor[3])
+
+    m:addEventListener("touch", function(ev)
+        return _G.sub_m_arbleTouch and _G.sub_m_arbleTouch(ev) or false
+    end)
+
+    marbles[#marbles + 1] = m
+end
+
+---------------------------------------------------------
 -- Touch-Listener für Murmeln
 ---------------------------------------------------------
 local function marbleTouch(event)
@@ -189,31 +238,48 @@ local function marbleTouch(event)
             target.spawnX = target.spawnX or target.x
             target.spawnY = target.spawnY or target.y
 
+            ------------------------------------------------
+            -- 1) Prüfen, ob Murmel in die Maschine darf
+            --    (nur wenn alle Slots voll sind & weit genug unten)
+            ------------------------------------------------
+            local thresholdY = display.contentHeight * 0.5
+
+            if machine and areAllSlotsFilled() and target.y >= thresholdY then
+                -- Wenn Bündel: nur den noch übrig gebliebenen Wert zählen
+                if target.isBundle then
+                    local remaining = target.remainingValue or target.totalValue or 0
+                    if remaining < 0 then remaining = 0 end
+                    target.countValue = remaining
+                end
+
+                machine:swallowMarble(target, function()
+                    blinkCounterBar()
+                end)
+                return true
+            end
+
+            ------------------------------------------------
+            -- 2) Bündel-Murmel: NICHT in Slots einrasten,
+            --    sondern Eine-Murmel spawnen + zurückspringen
+            ------------------------------------------------
+            if target.isBundle then
+                spawnOneFromBundle(target)
+                transition.to(target, {
+                    time       = 180,
+                    x          = target.spawnX,
+                    y          = target.spawnY,
+                    transition = easing.outQuad
+                })
+                return true
+            end
+
             ----------------------------------------------------------------
-            -- 1. Versuch: in einen freien Slot auf der rechten Seite einrasten
+            -- 3) Normale Einer-Murmel: zuerst versuchen einzurasten
             ----------------------------------------------------------------
             local snapRadius = 120
             local slot, dist2 = findNearestFreeSlot(target.x, target.y)
 
             if slot and dist2 and dist2 <= (snapRadius * snapRadius) then
-                -- Höherwertige Murmel (Bundle) soll NICHT einrasten:
-                -- Stattdessen Einermurmeln spawnen und zurückspringen.
-                if target.isBundle then
-                    -- Einmalig für diesen Drag die echte Tap-Event-Reaktion unterdrücken
-                    target.skipNextTap = true
-                    -- Manuell die Bundletap-Logik auslösen (spawnt Einermurmeln)
-                    onBundleTap({ target = target })
-
-                    transition.to(target, {
-                        time       = 200,
-                        x          = target.spawnX,
-                        y          = target.spawnY,
-                        transition = easing.outQuad
-                    })
-                    return true
-                end
-
-                -- Normale Murmel: in Slot einrasten
                 target.x = slot.x
                 target.y = slot.y
                 target.spawnX = target.x
@@ -226,109 +292,106 @@ local function marbleTouch(event)
             end
 
             ----------------------------------------------------------------
-            -- 2. Falls alle Slots voll sind: Murmel kann nach unten in die Maschine
+            -- 4) Ansonsten: zurück zum Spawnpunkt
             ----------------------------------------------------------------
-            local thresholdY = display.contentHeight * 0.5
-
-            if machine and areAllSlotsFilled() and target.y >= thresholdY then
-                machine:swallowMarble(target, function()
-                    blinkCounterBar()
-                end)
-                return true
-            else
-                ----------------------------------------------------------------
-                -- 3. Ansonsten: zurück zum Spawnpoint
-                ----------------------------------------------------------------
-                transition.to(target, {
-                    time       = 200,
-                    x          = target.spawnX,
-                    y          = target.spawnY,
-                    transition = easing.outQuad
-                })
-                return true
-            end
+            transition.to(target, {
+                time       = 200,
+                x          = target.spawnX,
+                y          = target.spawnY,
+                transition = easing.outQuad
+            })
+            return true
         end
     end
 
     return false
 end
 
+-- globaler Verweis für Spawn-Murmeln
+_G.sub_m_arbleTouch = marbleTouch
+
 ---------------------------------------------------------
--- Bundle-Tap: höherwertige Murmel in Einermurmeln „wechseln“
--- - Bei Tap werden bis zu 9 Einermurmeln gespawnt (insgesamt)
--- - Jede Einermurmel zählt 1 Punkt, dunkleres Blau
--- - countValue der Bundle-Murmel wird entsprechend reduziert
+-- Double-Tap-Handler (nur über Num-Hint)
 ---------------------------------------------------------
-onBundleTap = function(event)
-    local bundle = event.target
-    if not bundle or bundle.removed then
+local function makeDoubleTapHandler(radius)
+    local lastTapTime = 0
+    local doubleTapThreshold = 250  -- ms
+
+    return function(event)
+        local now = system.getTimer()
+        local isDouble = (now - lastTapTime) <= doubleTapThreshold
+        lastTapTime = now
+
+        if not isDouble then
+            return true
+        end
+
+        if not machine then
+            return true
+        end
+
+        local tapX, tapY = event.x, event.y
+        local r2 = radius * radius
+
+        for _, m in ipairs(marbles) do
+            if m and not m.removed and not m.locked and m.side == "left" then
+                local dx = m.x - tapX
+                local dy = m.y - tapY
+                local dist2 = dx*dx + dy*dy
+                if dist2 <= r2 then
+                    if m.isBundle then
+                        -- statt direkt zu zählen → Eine-Murmel spawnen
+                        spawnOneFromBundle(m)
+                    else
+                        if not areAllSlotsFilled() then
+                            -- in den nächsten freien Slot setzen
+                            local freeSlot = nil
+                            for _, s in ipairs(slots) do
+                                if not s.occupied then
+                                    freeSlot = s
+                                    break
+                                end
+                            end
+
+                            if freeSlot then
+                                freeSlot.occupied = true
+                                freeSlot.marble   = m
+                                m.locked = true
+                                transition.to(m, {
+                                    time = 150,
+                                    x    = freeSlot.x,
+                                    y    = freeSlot.y
+                                })
+                            else
+                                -- Fallback: zurück zum Spawn
+                                transition.to(m, {
+                                    time = 180,
+                                    x    = m.spawnX,
+                                    y    = m.spawnY
+                                })
+                            end
+                        else
+                            -- alle Slots sind voll → Murmel in die Maschine
+                            machine:swallowMarble(m, function()
+                                blinkCounterBar()
+                            end)
+                        end
+                    end
+                end
+            end
+        end
+
         return true
     end
-
-    -- Wenn der Tap von einem Drag-into-Slot kommt, wird der nächste echte Tap ignoriert.
-    if bundle.skipNextTap then
-        bundle.skipNextTap = nil
-        return true
-    end
-
-    local parent = bundle.parent
-    if not parent then return true end
-
-    local maxSpawn     = 9
-    local spawnedSoFar = bundle.spawnedOnes or 0
-    local remaining    = math.floor(bundle.countValue or 0)
-
-    -- Nichts mehr zu holen oder Limit erreicht
-    if spawnedSoFar >= maxSpawn or remaining <= 0 then
-        return true
-    end
-
-    -- Wie viele neue Einermurmeln dürfen wir diesmal erzeugen?
-    local canSpawn = math.min(maxSpawn - spawnedSoFar, remaining)
-
-    for i = 1, canSpawn do
-        local m = display.newImageRect(
-            parent,
-            "imgs/grey_marble.png",
-            264 * 0.6,
-            266 * 0.6
-        )
-
-        -- In der Nähe der Bundle-Murmel spawnen
-        m.x = bundle.x + math.random(-40, 40)
-        m.y = bundle.y + math.random(-40, 40)
-
-        m.spawnX  = m.x
-        m.spawnY  = m.y
-        m.removed = false
-        m.locked  = false
-
-        -- Jede Spawn-Murmel zählt als 1
-        m.countValue = 1
-
-        -- etwas dunkleres Blau
-        m:setFillColor(darkerOnesColor[1], darkerOnesColor[2], darkerOnesColor[3])
-
-        m:addEventListener("touch", marbleTouch)
-        marbles[#marbles + 1] = m
-
-        -- Die Bundle-Murmel verliert entsprechend Wert
-        bundle.countValue = (bundle.countValue or 0) - 1
-        spawnedSoFar = spawnedSoFar + 1
-    end
-
-    bundle.spawnedOnes = spawnedSoFar
-    return true
 end
 
 ---------------------------------------------------------
--- Murmeln erzeugen (links, mit Farbkodierung + countValue)
+-- Murmeln erzeugen (links, mit Bündel-Murmel + Farben)
 ---------------------------------------------------------
 local function spawnMarbles(sceneGroup, num, containerRect, side)
     local list = fixedSpawn[side] or {}
     local maxFixed = #list
 
-    -- Helper zum Erzeugen einer farbigen Murmel mit Wert
     local function createColoredMarble(x, y, color, countValue, isBundle)
         local m = display.newImageRect(
             sceneGroup,
@@ -342,30 +405,39 @@ local function spawnMarbles(sceneGroup, num, containerRect, side)
         m.spawnY = y
         m.removed = false
         m.locked  = false
-
-        m.countValue = countValue or 1  -- Wert, den die Murmel im Zähler repräsentiert
+        m.side    = side
+        m.countValue = countValue or 1
+        m.isBundle   = isBundle or false
 
         if color then
             m:setFillColor(color[1], color[2], color[3])
         end
 
-        if isBundle then
-            m.isBundle    = true
-            m.spawnedOnes = 0
-            m:addEventListener("tap", onBundleTap)
+        -- Bündel bekommt ein "Guthaben"
+        if m.isBundle then
+            m.totalValue     = m.countValue or 0
+            m.remainingValue = m.totalValue
+            m.spawnedOnes    = 0
         end
 
         m:addEventListener("touch", marbleTouch)
+
+        if m.isBundle then
+            m:addEventListener("tap", function()
+                spawnOneFromBundle(m)
+                return true
+            end)
+        end
+
         marbles[#marbles + 1] = m
         return m
     end
 
     if side == "left" then
-        -- Zahl in Einer + eine „Bündel“-Murmel auf Position 10
         local ones      = num % 10
         local tensColor = getTensColorForValue(num)
 
-        -- Einer-Murmeln: Positionen 1..9 (falls vorhanden)
+        -- Einer-Murmeln (immer Wert 1): Positionen 1..9
         local numOnes = math.min(ones, math.max(0, maxFixed - 1))
         for i = 1, numOnes do
             local pos = list[i]
@@ -382,20 +454,7 @@ local function spawnMarbles(sceneGroup, num, containerRect, side)
             createColoredMarble(pos[1], pos[2], tensColor, tensValue, true)
         end
     else
-        -- Falls wir später doch rechts Murmeln brauchen würden:
-        for i = 1, num do
-            local x, y
-            if i <= maxFixed then
-                local pos = list[i]
-                x, y = pos[1], pos[2]
-            else
-                local halfW = containerRect.width * 0.5 - 40
-                local halfH = containerRect.height * 0.5 - 40
-                x = containerRect.x + math.random(-halfW, halfW)
-                y = containerRect.y + math.random(-halfH, halfH)
-            end
-            createColoredMarble(x, y, marbleColors.ones, 1, false)
-        end
+        -- rechte Seite wird hier nicht benutzt (Slots sind dort)
     end
 end
 
@@ -437,9 +496,8 @@ function scene:create(event)
     slots   = {}
 
     local params = event.params or {}
-    local leftValue  = params.left  or 24
-    local rightValue = params.right or 8
-    -- Ergebnis wäre leftValue - rightValue, aber hier nur Info
+    local leftValue  = params.left  or 9
+    local rightValue = params.right or 3
 
     -----------------------------------------------------
     -- Background
@@ -502,7 +560,7 @@ function scene:create(event)
     rightRect:setFillColor(0.1, 0.15, 0.3, 0.85)
 
     -----------------------------------------------------
-    -- Num-Hints (Zahlen 0..99 über den Bereichen, statisch)
+    -- Num-Hints über den Bereichen
     -----------------------------------------------------
     local function clampToHintRange(v)
         if v < 0 then return 0 end
@@ -513,7 +571,6 @@ function scene:create(event)
     local leftFrame  = clampToHintRange(leftValue)  + 1
     local rightFrame = clampToHintRange(rightValue) + 1
 
-    -- linke Zahl (Minuend)
     numHintLeft = display.newSprite(sceneGroup, numHintSheet, { start = leftFrame, count = 1 })
     numHintLeft.x = leftRect.x
     numHintLeft.y = leftRect.y - (areaHeightTop * 0.5) - 40
@@ -521,13 +578,18 @@ function scene:create(event)
     numHintLeft.yScale = 1.6
     numHintLeft:setFrame(leftFrame)
 
-    -- rechte Zahl (Subtrahend)
     numHintRight = display.newSprite(sceneGroup, numHintSheet, { start = rightFrame, count = 1 })
     numHintRight.x = rightRect.x
     numHintRight.y = rightRect.y - (areaHeightTop * 0.5) - 40
     numHintRight.xScale = 1.6
     numHintRight.yScale = 1.6
     numHintRight:setFrame(rightFrame)
+
+    -----------------------------------------------------
+    -- Double-Tap: NUR auf dem linken Num-Hint
+    -----------------------------------------------------
+    local hintRadius = 1000
+    numHintLeft:addEventListener("tap", makeDoubleTapHandler(hintRadius))
 
     -----------------------------------------------------
     -- Murmeln links spawnen & Slots rechts anzeigen
@@ -572,9 +634,9 @@ function scene:create(event)
     })
     machine:setValue(0)
 
+    
     -----------------------------------------------------
     -- Voller Balken unter den Rollen (nicht segmentiert)
-    -- (logisch wie Divisor = 1)
     -----------------------------------------------------
     segmentBarGroup = display.newGroup()
     sceneGroup:insert(segmentBarGroup)
@@ -587,11 +649,9 @@ function scene:create(event)
     local barX      = machine.group.x + bodyW * 0.1
     local barY      = machine.group.y + bodyH * 0.36
 
-    -- Hintergrund
     local barBg = display.newRoundedRect(segmentBarGroup, barX, barY, barWidth, barHeight, 10)
     barBg:setFillColor(0, 0, 0, 0.6)
 
-    -- eigentlicher Balken
     counterBar = display.newRoundedRect(segmentBarGroup, barX, barY, barWidth - 6, barHeight - 6, 8)
     counterBar:setFillColor(0.2, 0.2, 0.35)
     counterBar.alpha = 0.7
@@ -676,7 +736,6 @@ function scene:destroy(event)
     segmentBarGroup = nil
     counterBar      = nil
 
-    -- Referenzen auf Num-Hints aufräumen
     numHintLeft  = nil
     numHintRight = nil
 end
