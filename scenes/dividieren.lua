@@ -9,6 +9,13 @@ local i18n           = require("lang.i18n")
 local CounterMachine = require("ui.counter_machine")
 
 ---------------------------------------------------------
+-- Animationsparameter
+-- Wie lange die Animation pro "Einheit" dauern soll (ms),
+-- wenn eine höherwertige Murmel gezählt wird.
+---------------------------------------------------------
+local UNIT_COUNT_DELAY = 120  -- nach Bedarf anpassbar
+
+---------------------------------------------------------
 -- Num-Hints (0–99) aus num_hints.png
 ---------------------------------------------------------
 local numHintSheetOptions = {
@@ -18,9 +25,50 @@ local numHintSheetOptions = {
 }
 local numHintSheet = graphics.newImageSheet("imgs/num_hints.png", numHintSheetOptions)
 
--- Referenzen für die beiden Zahlensprites
 local numHintLeft
 local numHintRight
+
+---------------------------------------------------------
+-- Farbige Murmeln (Farben von Num_Hints, auf 0–1 normalisiert)
+---------------------------------------------------------
+local marbleColors = {
+    ones      = {  9/255,   32.9/255,  91/255 },   -- Einer
+    tens      = {  9/255,   87.5/255,  91/255 },   -- Zehner (10–19)
+    twenties  = {  9/255,   91/255,    36.5/255 }, -- Zwanziger (20–29)
+    thirties  = { 45.1/255, 91/255,    9/255 },    -- Dreißiger (30–39)
+    forties   = { 70.6/255, 91/255,    9/255 },    -- Vierziger (40–49)
+    fifties   = { 91/255,   91/255,    9/255 },    -- Fünfziger (50–59)
+    sixties   = { 89/255,   64.3/255,  9/255 },    -- Sechziger (60–69)
+    seventies = { 88.6/255, 38.8/255,  8.6/255 },  -- Siebziger (70–79)
+    eighties  = { 91/255,    9/255,    9/255 },    -- Achtziger (80–89)
+    nineties  = { 65.9/255, 33.3/255, 76.5/255 },  -- Neunziger (90–99)
+}
+
+local function getTensColorForValue(v)
+    if v < 10 then return nil end
+    local bucket = math.floor(v / 10)
+    if bucket == 1 then
+        return marbleColors.tens
+    elseif bucket == 2 then
+        return marbleColors.twenties
+    elseif bucket == 3 then
+        return marbleColors.thirties
+    elseif bucket == 4 then
+        return marbleColors.forties
+    elseif bucket == 5 then
+        return marbleColors.fifties
+    elseif bucket == 6 then
+        return marbleColors.sixties
+    elseif bucket == 7 then
+        return marbleColors.seventies
+    elseif bucket == 8 then
+        return marbleColors.eighties
+    elseif bucket == 9 then
+        return marbleColors.nineties
+    else
+        return marbleColors.nineties
+    end
+end
 
 ---------------------------------------------------------
 -- Feste Spawn-Positionen für Dividend (linkes Feld)
@@ -44,8 +92,9 @@ local divisor        = 1
 local groupCount     = 0
 
 -- Rest-Logik
-local maxRemainder   = 0      -- wie viele Murmeln dürfen im Rest landen
-local remainderCount = 0      -- wie viele sind tatsächlich im Rest gelandet
+local maxRemainderUnits = 0  -- wie viele "Einheiten" dürfen im Rest landen (Dividend % Divisor)
+local remainderUnits    = 0  -- tatsächliche Einheiten im Rest
+local remainderCount    = 0  -- Anzahl der Rest-Murmeln (für Slot-Auswahl)
 
 -- Segmentbalken
 local segmentBarGroup
@@ -56,6 +105,10 @@ local SWALLOW_LINE_Y = 2000
 
 -- Feste Slots für Rest-Murmeln (max. 9)
 local restSlots = {}
+
+-- Zähl-Queue für animiertes Hochzählen
+local pendingUnits    = 0
+local isCountingUnits = false
 
 ---------------------------------------------------------
 -- Hilfsfunktion: Punkt in Rechteck?
@@ -92,9 +145,17 @@ local function blinkLastSegment(index)
 end
 
 ---------------------------------------------------------
--- Wenn eine Murmel gezählt wurde
+-- Ein "Einheits-Schritt" im Divisionsprozess
+-- (füllt ein Segment, ggf. komplette Gruppe → Counter + Blink)
 ---------------------------------------------------------
-local function onMarbleCounted()
+local function processOneUnit()
+    if pendingUnits <= 0 then
+        isCountingUnits = false
+        return
+    end
+
+    pendingUnits = pendingUnits - 1
+
     groupCount = groupCount + 1
 
     if groupCount == divisor then
@@ -105,6 +166,29 @@ local function onMarbleCounted()
     end
 
     updateSegmentBar()
+
+    if pendingUnits > 0 then
+        timer.performWithDelay(UNIT_COUNT_DELAY, processOneUnit)
+    else
+        isCountingUnits = false
+    end
+end
+
+---------------------------------------------------------
+-- Wenn eine Murmel (mit Wert amount) gezählt wurde
+-- amount: wie viele "Einheiten" die Murmel repräsentiert
+-- → Einheiten werden nacheinander animiert abgearbeitet
+---------------------------------------------------------
+local function onMarbleCounted(amount)
+    amount = amount or 1
+    if amount < 1 then amount = 1 end
+
+    pendingUnits = pendingUnits + amount
+
+    if not isCountingUnits then
+        isCountingUnits = true
+        processOneUnit()
+    end
 end
 
 ---------------------------------------------------------
@@ -113,6 +197,9 @@ end
 local function swallowIntoMachine(m)
     if m.removed then return end
     m.removed = true
+
+    local units = tonumber(m.countValue) or 1
+    if units < 1 then units = 1 end
 
     transition.to(m, {
         time   = 150,
@@ -123,7 +210,8 @@ local function swallowIntoMachine(m)
         alpha  = 0,
         onComplete = function()
             if m.removeSelf then m:removeSelf() end
-            onMarbleCounted()
+            -- Einheiten werden über die animierte Queue abgearbeitet
+            onMarbleCounted(units)
         end
     })
 end
@@ -153,6 +241,8 @@ local function marbleTouch(event)
             m.isFocus = false
 
             local x, y = m.x, m.y
+            local units = tonumber(m.countValue) or 1
+            if units < 1 then units = 1 end
 
             -------------------------------------------------
             -- 1) Schlucklinie: Maschine frisst Murmel
@@ -163,10 +253,11 @@ local function marbleTouch(event)
             end
 
             -------------------------------------------------
-            -- 2) Restfeld: maxRemainder begrenzt, feste Slots
+            -- 2) Restfeld: maxRemainderUnits begrenzt, feste Slots
             -------------------------------------------------
             if remainderRect and pointInRect(x, y, remainderRect) then
-                if remainderCount < maxRemainder then
+                if remainderUnits + units <= maxRemainderUnits then
+                    remainderUnits = remainderUnits + units
                     remainderCount = remainderCount + 1
 
                     -- Slot anhand remainderCount auswählen (1-basiert)
@@ -211,28 +302,50 @@ local function marbleTouch(event)
 end
 
 ---------------------------------------------------------
--- Murmeln im linken Feld erzeugen
+-- Murmeln im linken Feld erzeugen (mit Bündel-Murmel)
 ---------------------------------------------------------
 local function spawnMarbles(sceneGroup, num, rect)
     local list = fixedSpawn.left
-    for i = 1, num do
+    local maxFixed = #list
+
+    -- Helper: farbige Murmel mit Wert
+    local function createColoredMarble(x, y, color, countValue)
         local m = display.newImageRect(sceneGroup, "imgs/grey_marble.png", 264 * 0.6, 266 * 0.6)
 
-        if i <= #list then
-            m.x, m.y = list[i][1], list[i][2]
-        else
-            local hw = rect.width * 0.5 - 40
-            local hh = rect.height * 0.5 - 40
-            m.x = rect.x + math.random(-hw, hw)
-            m.y = rect.y + math.random(-hh, hh)
-        end
-
-        m.spawnX  = m.x
-        m.spawnY  = m.y
+        m.x, m.y = x, y
+        m.spawnX = x
+        m.spawnY = y
         m.removed = false
+        m.countValue = countValue or 1
+
+        if color then
+            m:setFillColor(color[1], color[2], color[3])
+        end
 
         m:addEventListener("touch", marbleTouch)
         marbles[#marbles + 1] = m
+        return m
+    end
+
+    -- Zahl in Einer + eine „Bündel“-Murmel auf Position 10 zerlegen
+    local ones      = num % 10
+    local tensColor = getTensColorForValue(num)
+
+    -- Einer-Murmeln (immer Wert 1): Positionen 1..9
+    local numOnes = math.min(ones, math.max(0, maxFixed - 1))
+    for i = 1, numOnes do
+        local pos = list[i]
+        createColoredMarble(pos[1], pos[2], marbleColors.ones, 1)
+    end
+
+    -- Bündel-Murmel auf Position 10, falls num >= 10
+    if tensColor and maxFixed >= 10 then
+        local pos       = list[10]
+        local tensValue = num - ones  -- z.B. 24 → 20
+        if tensValue < 1 then
+            tensValue = 1
+        end
+        createColoredMarble(pos[1], pos[2], tensColor, tensValue)
     end
 end
 
@@ -265,10 +378,13 @@ end
 function scene:create(event)
     local sceneGroup = self.view
 
-    marbles        = {}
-    segmentRects   = {}
-    remainderCount = 0
-    groupCount     = 0
+    marbles           = {}
+    segmentRects      = {}
+    remainderUnits    = 0
+    remainderCount    = 0
+    groupCount        = 0
+    pendingUnits      = 0
+    isCountingUnits   = false
 
     local params     = event.params or {}
     local leftValue  = params.left  or 10
@@ -276,7 +392,7 @@ function scene:create(event)
     divisor          = rightValue
     if divisor < 1 then divisor = 1 end
 
-    maxRemainder = leftValue % divisor  -- mathematisch korrekter Rest
+    maxRemainderUnits = leftValue % divisor  -- mathematisch korrekter Rest
 
     -----------------------------------------------------
     -- Hintergrund
@@ -327,7 +443,7 @@ function scene:create(event)
     remainderRect:setFillColor(0.15, 0.1, 0.25, 0.85)
 
     -----------------------------------------------------
-    -- Num-Hints (Zahlen 0..99 über den Bereichen, statisch)
+    -- Num-Hints über den Bereichen
     -----------------------------------------------------
     local function clampToHintRange(v)
         if v < 0 then return 0 end
@@ -338,7 +454,6 @@ function scene:create(event)
     local leftFrame  = clampToHintRange(leftValue)  + 1
     local rightFrame = clampToHintRange(rightValue) + 1
 
-    -- linke Zahl (Dividend)
     numHintLeft = display.newSprite(sceneGroup, numHintSheet, { start = leftFrame, count = 1 })
     numHintLeft.x = leftRect.x
     numHintLeft.y = leftRect.y - (areaH * 0.5) - 40
@@ -346,7 +461,6 @@ function scene:create(event)
     numHintLeft.yScale = 1.6
     numHintLeft:setFrame(leftFrame)
 
-    -- rechte Zahl (Divisor / teiler)
     numHintRight = display.newSprite(sceneGroup, numHintSheet, { start = rightFrame, count = 1 })
     numHintRight.x = remainderRect.x
     numHintRight.y = remainderRect.y - (areaH * 0.5) - 40
@@ -503,7 +617,6 @@ function scene:destroy(event)
     segmentRects    = {}
     restSlots       = {}
 
-    -- Referenzen auf Num-Hints aufräumen
     numHintLeft  = nil
     numHintRight = nil
 end

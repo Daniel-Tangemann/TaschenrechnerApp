@@ -38,6 +38,12 @@ local marbleColors = {
     nineties  = { 65.9/255, 33.3/255, 76.5/255 },  -- Neunziger (90–99)
 }
 
+local darkerOnesColor = {
+    marbleColors.ones[1] * 0.6,
+    marbleColors.ones[2] * 0.6,
+    marbleColors.ones[3] * 0.6,
+}
+
 local function getTensColorForValue(v)
     if v < 10 then return nil end
     local bucket = math.floor(v / 10)
@@ -92,19 +98,21 @@ local segmentBarGroup  -- Gruppe für den Balken
 local counterBar       -- einzelner, voller Balken
 
 ---------------------------------------------------------
+-- Vorwärtsdeklaration für Bundle-Tap (wird unten definiert)
+---------------------------------------------------------
+local onBundleTap
+
+---------------------------------------------------------
 -- Balken kurz aufblinken lassen, wenn gezählt wurde
 ---------------------------------------------------------
 local function blinkCounterBar()
     if not counterBar then return end
 
-    -- evtl. laufende Animation abbrechen
     transition.cancel(counterBar)
 
-    -- hell machen
     counterBar:setFillColor(1, 1, 0.2)
     counterBar.alpha = 1
 
-    -- wieder abdunkeln
     transition.to(counterBar, {
         time  = 200,
         alpha = 0.7,
@@ -184,11 +192,28 @@ local function marbleTouch(event)
             ----------------------------------------------------------------
             -- 1. Versuch: in einen freien Slot auf der rechten Seite einrasten
             ----------------------------------------------------------------
-            local snapRadius = 120    -- wie nah man sein muss, um zu snappen
+            local snapRadius = 120
             local slot, dist2 = findNearestFreeSlot(target.x, target.y)
 
             if slot and dist2 and dist2 <= (snapRadius * snapRadius) then
-                -- Murmel auf den Slot zentrieren und dort festsetzen
+                -- Höherwertige Murmel (Bundle) soll NICHT einrasten:
+                -- Stattdessen Einermurmeln spawnen und zurückspringen.
+                if target.isBundle then
+                    -- Einmalig für diesen Drag die echte Tap-Event-Reaktion unterdrücken
+                    target.skipNextTap = true
+                    -- Manuell die Bundletap-Logik auslösen (spawnt Einermurmeln)
+                    onBundleTap({ target = target })
+
+                    transition.to(target, {
+                        time       = 200,
+                        x          = target.spawnX,
+                        y          = target.spawnY,
+                        transition = easing.outQuad
+                    })
+                    return true
+                end
+
+                -- Normale Murmel: in Slot einrasten
                 target.x = slot.x
                 target.y = slot.y
                 target.spawnX = target.x
@@ -206,13 +231,14 @@ local function marbleTouch(event)
             local thresholdY = display.contentHeight * 0.5
 
             if machine and areAllSlotsFilled() and target.y >= thresholdY then
-                -- 🔴 hier hängen wir das Balken-Blinken dran
                 machine:swallowMarble(target, function()
                     blinkCounterBar()
                 end)
                 return true
             else
+                ----------------------------------------------------------------
                 -- 3. Ansonsten: zurück zum Spawnpoint
+                ----------------------------------------------------------------
                 transition.to(target, {
                     time       = 200,
                     x          = target.spawnX,
@@ -228,6 +254,74 @@ local function marbleTouch(event)
 end
 
 ---------------------------------------------------------
+-- Bundle-Tap: höherwertige Murmel in Einermurmeln „wechseln“
+-- - Bei Tap werden bis zu 9 Einermurmeln gespawnt (insgesamt)
+-- - Jede Einermurmel zählt 1 Punkt, dunkleres Blau
+-- - countValue der Bundle-Murmel wird entsprechend reduziert
+---------------------------------------------------------
+onBundleTap = function(event)
+    local bundle = event.target
+    if not bundle or bundle.removed then
+        return true
+    end
+
+    -- Wenn der Tap von einem Drag-into-Slot kommt, wird der nächste echte Tap ignoriert.
+    if bundle.skipNextTap then
+        bundle.skipNextTap = nil
+        return true
+    end
+
+    local parent = bundle.parent
+    if not parent then return true end
+
+    local maxSpawn     = 9
+    local spawnedSoFar = bundle.spawnedOnes or 0
+    local remaining    = math.floor(bundle.countValue or 0)
+
+    -- Nichts mehr zu holen oder Limit erreicht
+    if spawnedSoFar >= maxSpawn or remaining <= 0 then
+        return true
+    end
+
+    -- Wie viele neue Einermurmeln dürfen wir diesmal erzeugen?
+    local canSpawn = math.min(maxSpawn - spawnedSoFar, remaining)
+
+    for i = 1, canSpawn do
+        local m = display.newImageRect(
+            parent,
+            "imgs/grey_marble.png",
+            264 * 0.6,
+            266 * 0.6
+        )
+
+        -- In der Nähe der Bundle-Murmel spawnen
+        m.x = bundle.x + math.random(-40, 40)
+        m.y = bundle.y + math.random(-40, 40)
+
+        m.spawnX  = m.x
+        m.spawnY  = m.y
+        m.removed = false
+        m.locked  = false
+
+        -- Jede Spawn-Murmel zählt als 1
+        m.countValue = 1
+
+        -- etwas dunkleres Blau
+        m:setFillColor(darkerOnesColor[1], darkerOnesColor[2], darkerOnesColor[3])
+
+        m:addEventListener("touch", marbleTouch)
+        marbles[#marbles + 1] = m
+
+        -- Die Bundle-Murmel verliert entsprechend Wert
+        bundle.countValue = (bundle.countValue or 0) - 1
+        spawnedSoFar = spawnedSoFar + 1
+    end
+
+    bundle.spawnedOnes = spawnedSoFar
+    return true
+end
+
+---------------------------------------------------------
 -- Murmeln erzeugen (links, mit Farbkodierung + countValue)
 ---------------------------------------------------------
 local function spawnMarbles(sceneGroup, num, containerRect, side)
@@ -235,7 +329,7 @@ local function spawnMarbles(sceneGroup, num, containerRect, side)
     local maxFixed = #list
 
     -- Helper zum Erzeugen einer farbigen Murmel mit Wert
-    local function createColoredMarble(x, y, color, countValue)
+    local function createColoredMarble(x, y, color, countValue, isBundle)
         local m = display.newImageRect(
             sceneGroup,
             "imgs/grey_marble.png",
@@ -255,6 +349,12 @@ local function spawnMarbles(sceneGroup, num, containerRect, side)
             m:setFillColor(color[1], color[2], color[3])
         end
 
+        if isBundle then
+            m.isBundle    = true
+            m.spawnedOnes = 0
+            m:addEventListener("tap", onBundleTap)
+        end
+
         m:addEventListener("touch", marbleTouch)
         marbles[#marbles + 1] = m
         return m
@@ -269,17 +369,17 @@ local function spawnMarbles(sceneGroup, num, containerRect, side)
         local numOnes = math.min(ones, math.max(0, maxFixed - 1))
         for i = 1, numOnes do
             local pos = list[i]
-            createColoredMarble(pos[1], pos[2], marbleColors.ones, 1)
+            createColoredMarble(pos[1], pos[2], marbleColors.ones, 1, false)
         end
 
         -- Bündel-Murmel auf Position 10, falls num >= 10
         if tensColor and maxFixed >= 10 then
             local pos       = list[10]
-            local tensValue = num - ones  -- z.B. 23 → 20
+            local tensValue = num - ones  -- z.B. 24 → 20
             if tensValue < 1 then
                 tensValue = 1
             end
-            createColoredMarble(pos[1], pos[2], tensColor, tensValue)
+            createColoredMarble(pos[1], pos[2], tensColor, tensValue, true)
         end
     else
         -- Falls wir später doch rechts Murmeln brauchen würden:
@@ -294,7 +394,7 @@ local function spawnMarbles(sceneGroup, num, containerRect, side)
                 x = containerRect.x + math.random(-halfW, halfW)
                 y = containerRect.y + math.random(-halfH, halfH)
             end
-            createColoredMarble(x, y, marbleColors.ones, 1)
+            createColoredMarble(x, y, marbleColors.ones, 1, false)
         end
     end
 end
@@ -337,8 +437,8 @@ function scene:create(event)
     slots   = {}
 
     local params = event.params or {}
-    local leftValue  = params.left  or 9
-    local rightValue = params.right or 3
+    local leftValue  = params.left  or 24
+    local rightValue = params.right or 8
     -- Ergebnis wäre leftValue - rightValue, aber hier nur Info
 
     -----------------------------------------------------
