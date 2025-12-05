@@ -9,6 +9,20 @@ local i18n           = require("lang.i18n")
 local CounterMachine = require("ui.counter_machine")
 
 ---------------------------------------------------------
+-- Num-Hints (0–99) aus num_hints.png
+---------------------------------------------------------
+local numHintSheetOptions = {
+    width     = 64,
+    height    = 64,
+    numFrames = 100,   -- 0..99
+}
+local numHintSheet = graphics.newImageSheet("imgs/num_hints.png", numHintSheetOptions)
+
+-- Referenzen für die beiden Zahlensprites
+local numHintLeft
+local numHintRight
+
+---------------------------------------------------------
 -- Feste Spawn-Positionen (Canvas 1080 x 1920)
 ---------------------------------------------------------
 local fixedSpawn = {
@@ -16,7 +30,7 @@ local fixedSpawn = {
         {138, 380}, {280, 380}, {422, 380},
         {138, 545}, {280, 545}, {422, 545},
         {138, 715}, {280, 715}, {422, 715},
-        {138, 890}, {280, 890}, {422, 890},
+        {280, 890},
     }
 }
 
@@ -173,7 +187,7 @@ local function spawnMarbles(sceneGroup, num, containerRect)
     for i = 1, num do
         local m = display.newImageRect(
             sceneGroup,
-            "imgs/marble.png",
+            "imgs/grey_marble.png",
             264 * 0.6,
             266 * 0.6
         )
@@ -268,6 +282,34 @@ function scene:create(event)
     rightRect:setFillColor(0.1, 0.15, 0.3, 0.85)
 
     -----------------------------------------------------
+    -- Num-Hints (Zahlen 0..99 über den Bereichen, statisch)
+    -----------------------------------------------------
+    local function clampToHintRange(v)
+        if v < 0 then return 0 end
+        if v > 99 then return 99 end
+        return v
+    end
+
+    local leftFrame  = clampToHintRange(leftValue)  + 1
+    local rightFrame = clampToHintRange(rightValue) + 1
+
+    -- linke Zahl (Anzahl Start-Murmeln)
+    numHintLeft = display.newSprite(sceneGroup, numHintSheet, { start = leftFrame, count = 1 })
+    numHintLeft.x = leftRect.x
+    numHintLeft.y = leftRect.y - (areaHeightTop * 0.5) - 40
+    numHintLeft.xScale = 1.6
+    numHintLeft.yScale = 1.6
+    numHintLeft:setFrame(leftFrame)
+
+    -- rechte Zahl (Multiplikator / Faktor)
+    numHintRight = display.newSprite(sceneGroup, numHintSheet, { start = rightFrame, count = 1 })
+    numHintRight.x = rightRect.x
+    numHintRight.y = rightRect.y - (areaHeightTop * 0.5) - 40
+    numHintRight.xScale = 1.6
+    numHintRight.yScale = 1.6
+    numHintRight:setFrame(rightFrame)
+
+    -----------------------------------------------------
     -- Murmeln links spawnen
     -----------------------------------------------------
     spawnMarbles(sceneGroup, leftValue, leftRect)
@@ -305,6 +347,21 @@ function scene:create(event)
     -- Funnel-Zentrum relativ zum Sprite (Feintuning evtl. nötig)
     cloneCenterX = clonerSprite.x - clonerSprite.width * 0.25
     cloneCenterY = clonerSprite.y - clonerSprite.height * 0.10
+
+    -----------------------------------------------------
+    -- Swipe Hints
+    -----------------------------------------------------
+    local swipe_hint_0_b = display.newImageRect( 
+        sceneGroup, 
+        "imgs/swipe_hint.png", 
+        423, 
+        215 
+    )
+    swipe_hint_0_b.x = display.contentCenterX-200
+    swipe_hint_0_b.y = display.contentCenterY-100
+    swipe_hint_0_b.xScale = 0.5
+    swipe_hint_0_b.yScale = 0.5
+    swipe_hint_0_b.rotation = 0
 
     -----------------------------------------------------
     -- Zählmaschine unten
@@ -409,6 +466,10 @@ function scene:destroy(event)
     end
     segmentBarGroup = nil
     counterBar      = nil
+
+    -- Referenzen auf Num-Hints aufräumen
+    numHintLeft  = nil
+    numHintRight = nil
 end
 
 scene:addEventListener("create", scene)

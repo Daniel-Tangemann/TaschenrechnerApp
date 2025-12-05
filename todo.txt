@@ -1,20 +1,13 @@
 ToDo:
 ---assets---
-- Explosionsasset verbessern -done
-- zurück-Pfeil neu machen -done
-- Icon für "Zufall"-Taste -done
-- Ton beim Tastendruck -done (key_beep.wav)
-- Spritesheet für counter_machine -done (LED_spritesheet.png)
-- Assets für Num-Hint erstellen (v.a. die Zahl rechts ist nicht immer eindeutig erkennbar) -done (num_hints.png)
-- Spritesheet für Multiplikator -done (Multiplikator_Spritesheet.png)
 - Feuerwerk Animation erstellen
 - Hand-Animationen für Minispiele
 ---code---
-- Standardpositionen anpassen
+- der Counter soll in Addieren und Subtrahieren auch da sein und aufblinken (ist dann halt ein ganzer balken)-done
+- Standardpositionen anpassen -done
+- Swipe-Hints hinzufügen -done
+- num_hints hinzufügen -done
 - farbige Murmeln
-- Swipe-Hints hinzufügen
-- Ton beim Tastendruck
 - falsches rechnen verhindern
 - erkennen wenn die Aufgabe gelöst ist -> Screen mit der Vollständigen Aufgabe (z.B. 2 + 3 = 5), Feuerwerk Animation im Hintergrund
 - double tap auf Zahlenfeld bewegt mehrere Murmeln auf einmal in den Counter (bzw. da hin wo man sonst die Murmeln ziehen würde)
-- der Counter soll in Addieren und Subtrahieren auch da sein und aufblinken (ist dann halt ein ganzer balken), in Multiplizieren soll er segmentiert sein, wie beim Dividieren, und schnell durchlaufen/aufblinken während der Zähler läuft.

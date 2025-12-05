@@ -9,6 +9,20 @@ local i18n           = require("lang.i18n")
 local CounterMachine = require("ui.counter_machine")
 
 ---------------------------------------------------------
+-- Num-Hints (0–99) aus num_hints.png
+---------------------------------------------------------
+local numHintSheetOptions = {
+    width     = 64,
+    height    = 64,
+    numFrames = 100,   -- 0..99
+}
+local numHintSheet = graphics.newImageSheet("imgs/num_hints.png", numHintSheetOptions)
+
+-- Referenzen für die beiden Zahlensprites
+local numHintLeft
+local numHintRight
+
+---------------------------------------------------------
 -- Feste Spawn-Positionen für Dividend (linkes Feld)
 ---------------------------------------------------------
 local fixedSpawn = {
@@ -16,7 +30,7 @@ local fixedSpawn = {
         {138, 380}, {280, 380}, {422, 380},
         {138, 545}, {280, 545}, {422, 545},
         {138, 715}, {280, 715}, {422, 715},
-        {138, 890}, {280, 890}, {422, 890},
+        {280, 890},
     }
 }
 
@@ -202,7 +216,7 @@ end
 local function spawnMarbles(sceneGroup, num, rect)
     local list = fixedSpawn.left
     for i = 1, num do
-        local m = display.newImageRect(sceneGroup, "imgs/marble.png", 264 * 0.6, 266 * 0.6)
+        local m = display.newImageRect(sceneGroup, "imgs/grey_marble.png", 264 * 0.6, 266 * 0.6)
 
         if i <= #list then
             m.x, m.y = list[i][1], list[i][2]
@@ -313,6 +327,34 @@ function scene:create(event)
     remainderRect:setFillColor(0.15, 0.1, 0.25, 0.85)
 
     -----------------------------------------------------
+    -- Num-Hints (Zahlen 0..99 über den Bereichen, statisch)
+    -----------------------------------------------------
+    local function clampToHintRange(v)
+        if v < 0 then return 0 end
+        if v > 99 then return 99 end
+        return v
+    end
+
+    local leftFrame  = clampToHintRange(leftValue)  + 1
+    local rightFrame = clampToHintRange(rightValue) + 1
+
+    -- linke Zahl (Dividend)
+    numHintLeft = display.newSprite(sceneGroup, numHintSheet, { start = leftFrame, count = 1 })
+    numHintLeft.x = leftRect.x
+    numHintLeft.y = leftRect.y - (areaH * 0.5) - 40
+    numHintLeft.xScale = 1.6
+    numHintLeft.yScale = 1.6
+    numHintLeft:setFrame(leftFrame)
+
+    -- rechte Zahl (Divisor / teiler)
+    numHintRight = display.newSprite(sceneGroup, numHintSheet, { start = rightFrame, count = 1 })
+    numHintRight.x = remainderRect.x
+    numHintRight.y = remainderRect.y - (areaH * 0.5) - 40
+    numHintRight.xScale = 1.6
+    numHintRight.yScale = 1.6
+    numHintRight:setFrame(rightFrame)
+
+    -----------------------------------------------------
     -- Rest-Slots vorberechnen
     -----------------------------------------------------
     computeRestSlots()
@@ -321,6 +363,33 @@ function scene:create(event)
     -- Murmeln spawnen
     -----------------------------------------------------
     spawnMarbles(sceneGroup, leftValue, leftRect)
+
+    -----------------------------------------------------
+    -- Swipe Hints
+    -----------------------------------------------------
+    local swipe_hint_90_a = display.newImageRect( 
+        sceneGroup, 
+        "imgs/swipe_hint.png", 
+        423, 
+        215 
+    )
+    swipe_hint_90_a.x = display.contentCenterX-200
+    swipe_hint_90_a.y = display.contentCenterY
+    swipe_hint_90_a.xScale = 0.5
+    swipe_hint_90_a.yScale = 0.5
+    swipe_hint_90_a.rotation = 90
+
+    local swipe_hint_0_b = display.newImageRect( 
+        sceneGroup, 
+        "imgs/swipe_hint.png", 
+        423, 
+        215 
+    )
+    swipe_hint_0_b.x = display.contentCenterX
+    swipe_hint_0_b.y = display.contentCenterY-200
+    swipe_hint_0_b.xScale = 0.5
+    swipe_hint_0_b.yScale = 0.5
+    swipe_hint_0_b.rotation = 0
 
     -----------------------------------------------------
     -- Zählmaschine unten
@@ -433,6 +502,10 @@ function scene:destroy(event)
     segmentBarGroup = nil
     segmentRects    = {}
     restSlots       = {}
+
+    -- Referenzen auf Num-Hints aufräumen
+    numHintLeft  = nil
+    numHintRight = nil
 end
 
 scene:addEventListener("create", scene)

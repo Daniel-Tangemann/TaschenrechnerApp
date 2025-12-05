@@ -9,6 +9,62 @@ local i18n           = require("lang.i18n")
 local CounterMachine = require("ui.counter_machine")
 
 ---------------------------------------------------------
+-- Num-Hints (0–99) aus num_hints.png
+---------------------------------------------------------
+local numHintSheetOptions = {
+    width     = 64,
+    height    = 64,
+    numFrames = 100,   -- 0..99
+}
+local numHintSheet = graphics.newImageSheet("imgs/num_hints.png", numHintSheetOptions)
+
+-- Referenzen für die beiden Zahlensprites
+local numHintLeft
+local numHintRight
+
+---------------------------------------------------------
+-- Farbige Murmeln (Farben von Num_Hints, auf 0–1 normalisiert)
+---------------------------------------------------------
+local marbleColors = {
+    ones      = {  9/255,  32.9/255,  91/255 },   -- Einer
+    tens      = {  9/255,  87.5/255,  91/255 },   -- Zehner (10–19)
+    twenties  = {  9/255,  91/255,    36.5/255 }, -- Zwanziger (20–29)
+    thirties  = { 45.1/255, 91/255,    9/255 },   -- Dreißiger (30–39) → B-Komponente ergänzt
+    forties   = { 70.6/255, 91/255,    9/255 },   -- Vierziger (40–49)
+    fifties   = { 91/255,   91/255,    9/255 },   -- Fünfziger (50–59)
+    sixties   = { 89/255,   64.3/255,  9/255 },   -- Sechziger (60–69)
+    seventies = { 88.6/255, 38.8/255,  8.6/255 }, -- Siebziger (70–79)
+    eighties  = { 91/255,    9/255,    9/255 },   -- Achtziger (80–89)
+    nineties  = { 65.9/255, 33.3/255, 76.5/255 }, -- Neunziger (90–99)
+}
+
+local function getTensColorForValue(v)
+    if v < 10 then return nil end
+    local bucket = math.floor(v / 10)
+    if bucket == 1 then
+        return marbleColors.tens
+    elseif bucket == 2 then
+        return marbleColors.twenties
+    elseif bucket == 3 then
+        return marbleColors.thirties
+    elseif bucket == 4 then
+        return marbleColors.forties
+    elseif bucket == 5 then
+        return marbleColors.fifties
+    elseif bucket == 6 then
+        return marbleColors.sixties
+    elseif bucket == 7 then
+        return marbleColors.seventies
+    elseif bucket == 8 then
+        return marbleColors.eighties
+    elseif bucket == 9 then
+        return marbleColors.nineties
+    else
+        return marbleColors.nineties
+    end
+end
+
+---------------------------------------------------------
 -- Feste Spawn-Positionen (Canvas 1080 x 1920)
 ---------------------------------------------------------
 local fixedSpawn = {
@@ -16,13 +72,13 @@ local fixedSpawn = {
         {138, 380}, {280, 380}, {422, 380},
         {138, 545}, {280, 545}, {422, 545},
         {138, 715}, {280, 715}, {422, 715},
-        {138, 890}, {280, 890}, {422, 890},
+        {280, 890},
     },
     right = {
-        {618, 380}, {760, 380}, {902, 380},
-        {618, 545}, {760, 545}, {902, 545},
-        {618, 715}, {760, 715}, {902, 715},
-        {618, 890}, {760, 890}, {902, 890},
+        {650, 380}, {792, 380}, {934, 380},
+        {650, 545}, {792, 545}, {934, 545},
+        {650, 715}, {792, 715}, {934, 715},
+        {792, 890},
     }
 }
 
@@ -117,38 +173,76 @@ end
 ---------------------------------------------------------
 -- Murmeln erzeugen
 -- side = "left" oder "right"
+-- Links: Bündelung (Einer + eine 10er/20er/..-Murmel auf Position 10)
+-- Rechts: bis zu 9 Einer-Murmeln in Einer-Farbe
 ---------------------------------------------------------
 local function spawnMarbles(sceneGroup, num, containerRect, side)
     local list = fixedSpawn[side] or {}
-    local maxFixed = #list
 
-    for i = 1, num do
+    -- Helper zum Erzeugen einer farbigen Murmel
+    local function createColoredMarble(x, y, color)
         local m = display.newImageRect(
             sceneGroup,
-            "imgs/marble.png",
+            "imgs/grey_marble.png",
             264 * 0.6,
             266 * 0.6
         )
+        m.x, m.y = x, y
+        m.spawnX = x
+        m.spawnY = y
+        m.removed = false
 
-        if i <= maxFixed then
-            -- feste Positionen
-            local pos = list[i]
-            m.x, m.y = pos[1], pos[2]
-        else
-            -- zusätzliche Murmeln: in den Zwischenräumen des jeweiligen Bereichs
-            local halfW = containerRect.width * 0.5 - 40
-            local halfH = containerRect.height * 0.5 - 40
-            m.x = containerRect.x + math.random(-halfW, halfW)
-            m.y = containerRect.y + math.random(-halfH, halfH)
+        if color then
+            m:setFillColor(color[1], color[2], color[3])
         end
 
-        -- Spawnposition merken
-        m.spawnX = m.x
-        m.spawnY = m.y
-
-        m.removed = false
         m:addEventListener("touch", marbleTouch)
         marbles[#marbles + 1] = m
+        return m
+    end
+
+    if side == "left" then
+        -- Zahl in Einer + „Größenordnungs“-Murmel auf Position 10 zerlegen
+        local ones = num % 10
+        local tensColor = getTensColorForValue(num)
+
+        local maxFixed = #list -- sollte 10 sein
+
+        -- Einer-Murmeln: Positionen 1..min(ones, 9)
+        local numOnes = math.min(ones, math.max(0, maxFixed - 1))
+        for i = 1, numOnes do
+            local pos = list[i]
+            createColoredMarble(pos[1], pos[2], marbleColors.ones)
+        end
+
+        -- Größenordnungs-Murmel auf Position 10, falls num >= 10
+        if tensColor and maxFixed >= 10 then
+            local pos = list[10]
+            createColoredMarble(pos[1], pos[2], tensColor)
+        end
+
+        -- Für Werte > 99 oder Sonderfälle könnten hier später weitere
+        -- Murmellogiken ergänzt werden. Aktuell: max 10 Murmeln links.
+
+    else
+        -- Rechts: einfache Einer-Murmeln, farblich wie „Einer“
+        local maxFixed = #list
+        local count = math.min(num, maxFixed)
+
+        -- Auf den festen Positionen
+        for i = 1, count do
+            local pos = list[i]
+            createColoredMarble(pos[1], pos[2], marbleColors.ones)
+        end
+
+        -- Falls ausnahmsweise mehr als maxFixed Murmeln gebraucht würden:
+        for i = maxFixed + 1, num do
+            local halfW = containerRect.width * 0.5 - 40
+            local halfH = containerRect.height * 0.5 - 40
+            local x = containerRect.x + math.random(-halfW, halfW)
+            local y = containerRect.y + math.random(-halfH, halfH)
+            createColoredMarble(x, y, marbleColors.ones)
+        end
     end
 end
 
@@ -172,6 +266,33 @@ function scene:create(event)
     )
     backgr.x = display.contentCenterX
     backgr.y = display.contentCenterY
+
+    -----------------------------------------------------
+    -- Swipe Hints
+    -----------------------------------------------------
+    local swipe_hint_90_a = display.newImageRect( 
+        sceneGroup, 
+        "imgs/swipe_hint.png", 
+        423, 
+        215 
+    )
+    swipe_hint_90_a.x = display.contentCenterX+200
+    swipe_hint_90_a.y = display.contentCenterY-100
+    swipe_hint_90_a.xScale = 0.5
+    swipe_hint_90_a.yScale = 0.5
+    swipe_hint_90_a.rotation = 90
+
+    local swipe_hint_90_b = display.newImageRect( 
+        sceneGroup, 
+        "imgs/swipe_hint.png", 
+        423, 
+        215 
+    )
+    swipe_hint_90_b.x = display.contentCenterX-200
+    swipe_hint_90_b.y = display.contentCenterY-100
+    swipe_hint_90_b.xScale = 0.5
+    swipe_hint_90_b.yScale = 0.5
+    swipe_hint_90_b.rotation = 90
 
     -----------------------------------------------------
     -- Banner / Titel oben
@@ -222,7 +343,35 @@ function scene:create(event)
     rightRect:setFillColor(0.1, 0.15, 0.3, 0.85)
 
     -----------------------------------------------------
-    -- Murmeln oben spawnen
+    -- Num-Hints (Zahlen 0..99 über den Murmel-Bereichen, statisch)
+    -----------------------------------------------------
+    local function clampToHintRange(v)
+        if v < 0 then return 0 end
+        if v > 99 then return 99 end
+        return v
+    end
+
+    local leftFrame  = clampToHintRange(leftValue)  + 1  -- +1 weil Frames bei 1 anfangen
+    local rightFrame = clampToHintRange(rightValue) + 1
+
+    -- linke Zahl
+    numHintLeft = display.newSprite(sceneGroup, numHintSheet, { start = leftFrame, count = 1 })
+    numHintLeft.x = leftRect.x
+    numHintLeft.y = leftRect.y - (areaHeightTop * 0.5) - 40
+    numHintLeft.xScale = 1.6
+    numHintLeft.yScale = 1.6
+    numHintLeft:setFrame(leftFrame)
+
+    -- rechte Zahl
+    numHintRight = display.newSprite(sceneGroup, numHintSheet, { start = rightFrame, count = 1 })
+    numHintRight.x = rightRect.x
+    numHintRight.y = rightRect.y - (areaHeightTop * 0.5) - 40
+    numHintRight.xScale = 1.6
+    numHintRight.yScale = 1.6
+    numHintRight:setFrame(rightFrame)
+
+    -----------------------------------------------------
+    -- Murmeln oben spawnen (mit Farbkodierung)
     -----------------------------------------------------
     spawnMarbles(sceneGroup, leftValue,  leftRect,  "left")
     spawnMarbles(sceneGroup, rightValue, rightRect, "right")
@@ -332,6 +481,10 @@ function scene:destroy(event)
     end
     segmentBarGroup = nil
     counterBar      = nil
+
+    -- Referenzen auf Num-Hints aufräumen (Sprites hängen im sceneGroup)
+    numHintLeft  = nil
+    numHintRight = nil
 end
 
 scene:addEventListener("create", scene)
