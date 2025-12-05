@@ -3,11 +3,5 @@ ToDo:
 - Feuerwerk Animation erstellen
 - Hand-Animationen für Minispiele
 ---code---
-- der Counter soll in Addieren und Subtrahieren auch da sein und aufblinken (ist dann halt ein ganzer balken)-done
-- Standardpositionen anpassen -done
-- Swipe-Hints hinzufügen -done
-- num_hints hinzufügen -done
-- farbige Murmeln -done
-- falsches rechnen verhindern -done
-- erkennen wenn die Aufgabe gelöst ist -> Screen mit der Vollständigen Aufgabe (z.B. 2 + 3 = 5), Feuerwerk Animation im Hintergrund
-- double tap auf Zahlenfeld bewegt mehrere Murmeln auf einmal in den Counter (bzw. da hin wo man sonst die Murmeln ziehen würde)
+- erkennen wenn die Aufgabe gelöst ist -done -> Screen mit der Vollständigen Aufgabe (z.B. 2 + 3 = 5), Feuerwerk Animation im Hintergrund
+- double tap bei Division)

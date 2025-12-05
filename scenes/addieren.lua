@@ -12,18 +12,37 @@ local CounterMachine = require("ui.counter_machine")
 -- Num-Hints (0–99) aus num_hints.png
 ---------------------------------------------------------
 local numHintSheetOptions = {
-    width     = 64,
-    height    = 64,
-    numFrames = 100,   -- 0..99
+    width              = 64,
+    height             = 64,
+    numFrames          = 100,   -- 0..99
+    sheetContentWidth  = 640,
+    sheetContentHeight = 640,
 }
 local numHintSheet = graphics.newImageSheet("imgs/num_hints.png", numHintSheetOptions)
 
--- Referenzen für die beiden Zahlensprites
 local numHintLeft
 local numHintRight
 
 ---------------------------------------------------------
--- Farbige Murmeln (Farben von Num_Hints, auf 0–1 normalisiert)
+-- Feste Spawn-Positionen (Canvas 1080 x 1920)
+---------------------------------------------------------
+local fixedSpawn = {
+    left = {
+        {138, 380}, {280, 380}, {422, 380},
+        {138, 545}, {280, 545}, {422, 545},
+        {138, 715}, {280, 715}, {422, 715},
+        {280, 890},
+    },
+    right = {
+        {650, 380}, {792, 380}, {934, 380},
+        {650, 545}, {792, 545}, {934, 545},
+        {650, 715}, {792, 715}, {934, 715},
+        {792, 890},
+    }
+}
+
+---------------------------------------------------------
+-- Farbige Murmeln (wie bei den Num_Hints, normalisiert)
 ---------------------------------------------------------
 local marbleColors = {
     ones      = {  9/255,   32.9/255,  91/255 },   -- Einer
@@ -65,24 +84,6 @@ local function getTensColorForValue(v)
 end
 
 ---------------------------------------------------------
--- Feste Spawn-Positionen (Canvas 1080 x 1920)
----------------------------------------------------------
-local fixedSpawn = {
-    left = {
-        {138, 380}, {280, 380}, {422, 380},
-        {138, 545}, {280, 545}, {422, 545},
-        {138, 715}, {280, 715}, {422, 715},
-        {280, 890},
-    },
-    right = {
-        {650, 380}, {792, 380}, {934, 380},
-        {650, 545}, {792, 545}, {934, 545},
-        {650, 715}, {792, 715}, {934, 715},
-        {792, 890},
-    }
-}
-
----------------------------------------------------------
 -- Lokale Variablen
 ---------------------------------------------------------
 local marbles = {}
@@ -90,20 +91,65 @@ local machine          -- CounterMachine-Instanz
 local segmentBarGroup  -- Gruppe für den Balken
 local counterBar       -- einzelner, voller Balken
 
+-- Ergebnis-Erkennung
+local targetResult = 0
+local solved       = false
+local rootGroup
+local resultPopupGroup
+local solvedListenerAdded = false
+
+---------------------------------------------------------
+-- Hilfsfunktionen: Ergebnis-Popup
+---------------------------------------------------------
+local function showResultPopup()
+    if resultPopupGroup or not rootGroup then
+        return
+    end
+
+    resultPopupGroup = display.newGroup()
+    rootGroup:insert(resultPopupGroup)
+
+    local overlay = display.newRoundedRect(
+        resultPopupGroup,
+        display.contentCenterX,
+        display.contentCenterY,
+        display.contentWidth * 0.8,
+        display.contentHeight * 0.4,
+        32
+    )
+    overlay:setFillColor(0, 0, 0, 0.8)
+
+    display.newText({
+        parent   = resultPopupGroup,
+        text     = tostring(targetResult),
+        x        = display.contentCenterX,
+        y        = display.contentCenterY,
+        font     = native.systemFontBold,
+        fontSize = 100,
+        align    = "center"
+    })
+
+    -- Tap zum Schließen (bis deine finalen Assets da sind)
+    overlay:addEventListener("tap", function()
+        if resultPopupGroup and resultPopupGroup.removeSelf then
+            resultPopupGroup:removeSelf()
+        end
+        resultPopupGroup = nil
+        return true
+    end)
+end
+
 ---------------------------------------------------------
 -- Balken kurz aufblinken lassen, wenn gezählt wurde
 ---------------------------------------------------------
 local function blinkCounterBar()
     if not counterBar then return end
 
-    -- evtl. laufende Animation abbrechen
     transition.cancel(counterBar)
 
-    -- hell machen
     counterBar:setFillColor(1, 1, 0.2)
     counterBar.alpha = 1
 
-    -- wieder abdunkeln
     transition.to(counterBar, {
         time  = 200,
         alpha = 0.7,
@@ -113,6 +159,35 @@ local function blinkCounterBar()
             end
         end
     })
+end
+
+---------------------------------------------------------
+-- Murmel → Maschine schicken
+---------------------------------------------------------
+local function swallowMarbleIntoMachine(marble)
+    if not machine or not marble or marble.removed then
+        return
+    end
+    machine:swallowMarble(marble, blinkCounterBar)
+end
+
+---------------------------------------------------------
+-- Ergebnis-Polling (robust, unabhängig vom Callback)
+---------------------------------------------------------
+local function checkSolved()
+    if solved or not machine then
+        return
+    end
+
+    local current = machine.value or 0
+    if current == targetResult then
+        solved = true
+        showResultPopup()
+    end
+end
+
+local function enterFrameListener()
+    checkSolved()
 end
 
 ---------------------------------------------------------
@@ -140,20 +215,14 @@ local function marbleTouch(event)
             display.getCurrentStage():setFocus(nil)
             target.isFocus = false
 
-            -- Sicherheitsnetz
             target.spawnX = target.spawnX or target.x
             target.spawnY = target.spawnY or target.y
 
-            -- Schwelle: "über die Hälfte nach unten gezogen"
             local thresholdY = display.contentHeight * 0.5
 
             if machine and target.y >= thresholdY then
-                -- weiter als die Hälfte → Maschine saugt ein
-                machine:swallowMarble(target, function()
-                    blinkCounterBar()
-                end)
+                swallowMarbleIntoMachine(target)
             else
-                -- nicht weit genug → zurück zum Spawnpoint
                 transition.to(target, {
                     time       = 200,
                     x          = target.spawnX,
@@ -170,44 +239,32 @@ local function marbleTouch(event)
 end
 
 ---------------------------------------------------------
--- Double-Tap-Handler-Factory
--- side: "left" oder "right"
--- radius: Suchradius um Tap-Punkt
--- Double-Tap auf:
---   * Bereich → lokaler Radius
---   * Num-Hint → großer Radius ("fast alle" Murmeln der Seite)
+-- Double-Tap-Handler: schickt Murmeln im Radius in den Counter
 ---------------------------------------------------------
-local function makeDoubleTapHandler(side, radius)
-    local lastTapTime = 0
-    local doubleTapThreshold = 250  -- ms
+local function makeDoubleTapHandler(side)
+    local radius = 300
+    local r2     = radius * radius
 
     return function(event)
-        local now = system.getTimer()
-        local isDouble = (now - lastTapTime) <= doubleTapThreshold
-        lastTapTime = now
+        if event.numTaps and event.numTaps >= 2 then
+            if not machine then
+                return true
+            end
 
-        if not isDouble then
-            return true
-        end
+            local tapX, tapY = event.x, event.y
 
-        if not machine then
-            return true
-        end
-
-        local tapX, tapY = event.x, event.y
-        local r2 = radius * radius
-
-        for _, m in ipairs(marbles) do
-            if m and not m.removed and not m.locked and m.side == side then
-                local dx = m.x - tapX
-                local dy = m.y - tapY
-                local dist2 = dx*dx + dy*dy
-                if dist2 <= r2 then
-                    machine:swallowMarble(m, function()
-                        blinkCounterBar()
-                    end)
+            for _, m in ipairs(marbles) do
+                if m and not m.removed and m.side == side then
+                    local dx = m.x - tapX
+                    local dy = m.y - tapY
+                    local dist2 = dx*dx + dy*dy
+                    if dist2 <= r2 then
+                        swallowMarbleIntoMachine(m)
+                    end
                 end
             end
+
+            return true
         end
 
         return true
@@ -217,13 +274,12 @@ end
 ---------------------------------------------------------
 -- Murmeln erzeugen
 -- side = "left" oder "right"
--- Mit Farbkodierung + countValue für korrektes Rechnen
 ---------------------------------------------------------
 local function spawnMarbles(sceneGroup, num, containerRect, side)
     local list = fixedSpawn[side] or {}
     local maxFixed = #list
 
-    local function createColoredMarble(x, y, color, countValue)
+    local function createMarble(x, y, color, countValue)
         local m = display.newImageRect(
             sceneGroup,
             "imgs/grey_marble.png",
@@ -231,12 +287,11 @@ local function spawnMarbles(sceneGroup, num, containerRect, side)
             266 * 0.6
         )
 
-        m.x, m.y = x, y
-        m.spawnX = x
-        m.spawnY = y
-        m.removed = false
-        m.locked  = false
-        m.side    = side
+        m.x, m.y   = x, y
+        m.spawnX   = x
+        m.spawnY   = y
+        m.removed  = false
+        m.side     = side
         m.countValue = countValue or 1
 
         if color then
@@ -248,53 +303,38 @@ local function spawnMarbles(sceneGroup, num, containerRect, side)
         return m
     end
 
-    if side == "left" then
-        -- Zahl in Einer + eine „Bündel“-Murmel auf Position 10
-        local ones      = num % 10
-        local tensColor = getTensColorForValue(num)
+    local ones      = num % 10
+    local tensColor = getTensColorForValue(num)
 
-        -- Einer-Murmeln: Positionen 1..9
-        local numOnes = math.min(ones, math.max(0, maxFixed - 1))
-        for i = 1, numOnes do
-            local pos = list[i]
-            createColoredMarble(pos[1], pos[2], marbleColors.ones, 1)
-        end
+    -- Einer-Murmeln
+    local numOnes = math.min(ones, math.max(0, maxFixed - 1))
+    for i = 1, numOnes do
+        local pos = list[i]
+        createMarble(pos[1], pos[2], marbleColors.ones, 1)
+    end
 
-        -- Bündel-Murmel auf Position 10, falls num >= 10
-        if tensColor and maxFixed >= 10 then
-            local pos       = list[10]
-            local tensValue = num - ones  -- z.B. 23 → 20
-            if tensValue < 1 then
-                tensValue = 1
-            end
-            createColoredMarble(pos[1], pos[2], tensColor, tensValue)
-        end
-    else
-        -- Rechte Seite: nur Einer-Murmeln (alle Wert 1)
-        for i = 1, num do
-            local x, y
-            if i <= maxFixed then
-                local pos = list[i]
-                x, y = pos[1], pos[2]
-            else
-                local halfW = containerRect.width * 0.5 - 40
-                local halfH = containerRect.height * 0.5 - 40
-                x = containerRect.x + math.random(-halfW, halfW)
-                y = containerRect.y + math.random(-halfH, halfH)
-            end
-            createColoredMarble(x, y, marbleColors.ones, 1)
-        end
+    -- Bündel-Murmel (z.B. 20, 30, 40...) auf Slot 10
+    if tensColor and maxFixed >= 10 then
+        local pos       = list[10]
+        local bundleVal = num - ones
+        if bundleVal < 1 then bundleVal = 1 end
+        createMarble(pos[1], pos[2], tensColor, bundleVal)
     end
 end
 
 ---------------------------------------------------------
 function scene:create(event)
     local sceneGroup = self.view
+    rootGroup        = sceneGroup
     marbles = {}
+    solved  = false
+    resultPopupGroup   = nil
+    solvedListenerAdded = false
 
     local params = event.params or {}
     local leftValue  = params.left  or 3
     local rightValue = params.right or 4
+    targetResult     = leftValue + rightValue
 
     -----------------------------------------------------
     -- Background
@@ -311,11 +351,11 @@ function scene:create(event)
     -----------------------------------------------------
     -- Swipe Hints
     -----------------------------------------------------
-    local swipe_hint_90_a = display.newImageRect( 
-        sceneGroup, 
-        "imgs/swipe_hint.png", 
-        423, 
-        215 
+    local swipe_hint_90_a = display.newImageRect(
+        sceneGroup,
+        "imgs/swipe_hint.png",
+        423,
+        215
     )
     swipe_hint_90_a.x = display.contentCenterX+200
     swipe_hint_90_a.y = display.contentCenterY-100
@@ -323,11 +363,11 @@ function scene:create(event)
     swipe_hint_90_a.yScale = 0.5
     swipe_hint_90_a.rotation = 90
 
-    local swipe_hint_90_b = display.newImageRect( 
-        sceneGroup, 
-        "imgs/swipe_hint.png", 
-        423, 
-        215 
+    local swipe_hint_90_b = display.newImageRect(
+        sceneGroup,
+        "imgs/swipe_hint.png",
+        423,
+        215
     )
     swipe_hint_90_b.x = display.contentCenterX-200
     swipe_hint_90_b.y = display.contentCenterY-100
@@ -347,7 +387,7 @@ function scene:create(event)
     banner.x = display.contentCenterX
     banner.y = 120
 
-    local title = display.newText({
+    display.newText({
         parent   = sceneGroup,
         text     = i18n.t("add_title"),
         x        = banner.x,
@@ -384,7 +424,7 @@ function scene:create(event)
     rightRect:setFillColor(0.1, 0.15, 0.3, 0.85)
 
     -----------------------------------------------------
-    -- Num-Hints (Zahlen 0..99 über den Bereichen, statisch)
+    -- Num-Hints über den Bereichen
     -----------------------------------------------------
     local function clampToHintRange(v)
         if v < 0 then return 0 end
@@ -395,16 +435,18 @@ function scene:create(event)
     local leftFrame  = clampToHintRange(leftValue)  + 1
     local rightFrame = clampToHintRange(rightValue) + 1
 
-    -- linke Zahl
-    numHintLeft = display.newSprite(sceneGroup, numHintSheet, { start = leftFrame, count = 1 })
+    numHintLeft = display.newSprite(sceneGroup, numHintSheet, {
+        { name = "static", start = 1, count = 1, time = 0 }
+    })
     numHintLeft.x = leftRect.x
     numHintLeft.y = leftRect.y - (areaHeightTop * 0.5) - 40
     numHintLeft.xScale = 1.6
     numHintLeft.yScale = 1.6
     numHintLeft:setFrame(leftFrame)
 
-    -- rechte Zahl
-    numHintRight = display.newSprite(sceneGroup, numHintSheet, { start = rightFrame, count = 1 })
+    numHintRight = display.newSprite(sceneGroup, numHintSheet, {
+        { name = "static", start = 1, count = 1, time = 0 }
+    })
     numHintRight.x = rightRect.x
     numHintRight.y = rightRect.y - (areaHeightTop * 0.5) - 40
     numHintRight.xScale = 1.6
@@ -412,21 +454,15 @@ function scene:create(event)
     numHintRight:setFrame(rightFrame)
 
     -----------------------------------------------------
-    -- Double-Tap-Listener für Bereiche + Num-Hints
-    -- Bereich: kleiner Radius (lokale Gruppe)
-    -- Num-Hint: großer Radius (praktisch alle)
+    -- Double-Tap: links & rechts (jeweils nur eigene Murmeln)
     -----------------------------------------------------
-    local areaRadius   = 220
-    local hintRadius   = 1000
-
-    leftRect:addEventListener("tap",  makeDoubleTapHandler("left",  areaRadius))
-    rightRect:addEventListener("tap", makeDoubleTapHandler("right", areaRadius))
-
-    numHintLeft:addEventListener("tap",  makeDoubleTapHandler("left",  hintRadius))
-    numHintRight:addEventListener("tap", makeDoubleTapHandler("right", hintRadius))
+    leftRect:addEventListener("tap",      makeDoubleTapHandler("left"))
+    numHintLeft:addEventListener("tap",   makeDoubleTapHandler("left"))
+    rightRect:addEventListener("tap",     makeDoubleTapHandler("right"))
+    numHintRight:addEventListener("tap",  makeDoubleTapHandler("right"))
 
     -----------------------------------------------------
-    -- Murmeln oben spawnen (links & rechts)
+    -- Murmeln oben spawnen
     -----------------------------------------------------
     spawnMarbles(sceneGroup, leftValue,  leftRect,  "left")
     spawnMarbles(sceneGroup, rightValue, rightRect, "right")
@@ -443,7 +479,6 @@ function scene:create(event)
 
     -----------------------------------------------------
     -- Voller Balken unter den Rollen (nicht segmentiert)
-    -- (logisch wie Divisor = 1)
     -----------------------------------------------------
     segmentBarGroup = display.newGroup()
     sceneGroup:insert(segmentBarGroup)
@@ -456,11 +491,9 @@ function scene:create(event)
     local barX      = machine.group.x + bodyW * 0.1
     local barY      = machine.group.y + bodyH * 0.36
 
-    -- Hintergrund
     local barBg = display.newRoundedRect(segmentBarGroup, barX, barY, barWidth, barHeight, 10)
     barBg:setFillColor(0, 0, 0, 0.6)
 
-    -- eigentlicher Balken
     counterBar = display.newRoundedRect(segmentBarGroup, barX, barY, barWidth - 6, barHeight - 6, 8)
     counterBar:setFillColor(0.2, 0.2, 0.35)
     counterBar.alpha = 0.7
@@ -511,6 +544,12 @@ function scene:create(event)
     )
     arrow.x = backBtn.group.x
     arrow.y = backBtn.group.y
+
+    -----------------------------------------------------
+    -- Ergebnis-Listener aktivieren
+    -----------------------------------------------------
+    Runtime:addEventListener("enterFrame", enterFrameListener)
+    solvedListenerAdded = true
 end
 
 function scene:show(event)
@@ -520,6 +559,11 @@ function scene:hide(event)
 end
 
 function scene:destroy(event)
+    if solvedListenerAdded then
+        Runtime:removeEventListener("enterFrame", enterFrameListener)
+        solvedListenerAdded = false
+    end
+
     for i = #marbles, 1, -1 do
         local m = marbles[i]
         if m.removeSelf then
@@ -539,6 +583,11 @@ function scene:destroy(event)
 
     numHintLeft  = nil
     numHintRight = nil
+
+    if resultPopupGroup and resultPopupGroup.removeSelf then
+        resultPopupGroup:removeSelf()
+    end
+    resultPopupGroup = nil
 end
 
 scene:addEventListener("create", scene)
