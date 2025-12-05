@@ -240,11 +240,12 @@ function CounterMachine:isInFunnelArea(x, y)
        and dy <= belowHeight
 end
 
-
 ----------------------------------------------------------------
 -- eine Murmel "schlucken"
 -- marble: display-Objekt der Murmel
 -- onDone: optionaler Callback nach dem Zählen
+--
+-- NEU: nutzt marble.countValue (oder 1), um mehrfach zu inkrementieren
 ----------------------------------------------------------------
 function CounterMachine:swallowMarble(marble, onDone)
     if not marble or marble.removed then
@@ -265,8 +266,14 @@ function CounterMachine:swallowMarble(marble, onDone)
                 marble:removeSelf()
             end
 
-            -- Zähler inkrementieren
-            self:increment()
+            -- Wert der Murmel bestimmen (Standard: 1)
+            local amount = tonumber(marble.countValue) or 1
+            if amount < 1 then amount = 1 end
+
+            -- Zähler um amount erhöhen (Queue kümmert sich um Animation)
+            for i = 1, amount do
+                self:increment()
+            end
 
             if onDone then
                 onDone()
