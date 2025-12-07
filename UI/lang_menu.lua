@@ -97,6 +97,7 @@ function LangMenu.toggle(parentGroup, anchorX, anchorY)
             scale  = flagScale,
             x      = box.x,
             y      = y,
+            playSound = false,
             onTap  = function()
                 -- Sprache umstellen
                 i18n.load(cfg.lang)

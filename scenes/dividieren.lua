@@ -7,6 +7,7 @@ local Button         = require("ui.button")
 local HelpPopup      = require("ui.help_popup")
 local i18n           = require("lang.i18n")
 local CounterMachine = require("ui.counter_machine")
+local Sound          = require("sound")
 
 ---------------------------------------------------------
 -- Animationsparameter
@@ -324,6 +325,12 @@ local function processOneUnit()
 
     groupCount = groupCount + 1
 
+    -- 🔊 Key-Beep NUR für „Zwischen“-Segmente,
+    --    also wenn die Gruppe noch NICHT voll ist:
+    if groupCount < divisor then
+        Sound.playDing()
+    end
+
     if groupCount == divisor then
         -- komplette Gruppe voll → 1 zum Quotienten und letzter Balken blinkt
         blinkLastSegment(divisor)
@@ -422,7 +429,7 @@ end
 ---------------------------------------------------------
 function onSolved()
     stopSwipeTutorial()
-
+    Sound.playCorrect()     -- ✅ Correct-Sound, einmal beim Lösen
     if machineSolvedAnimating or not machine or not machine.group then
         return
     end

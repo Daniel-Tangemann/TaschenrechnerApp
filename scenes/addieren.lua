@@ -7,6 +7,7 @@ local Button         = require("ui.button")
 local HelpPopup      = require("ui.help_popup")
 local i18n           = require("lang.i18n")
 local CounterMachine = require("ui.counter_machine")
+local Sound          = require("sound")
 
 ---------------------------------------------------------
 -- Num-Hints (0–99) aus num_hints.png
@@ -256,7 +257,7 @@ end
 ---------------------------------------------------------
 local function onSolved()
     stopSwipeTutorial()
-
+    Sound.playCorrect()     -- ✅ Correct-Sound, einmal beim Lösen
     if machineSolvedAnimating or not machine or not machine.group then
         return
     end

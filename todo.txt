@@ -1,7 +1,3 @@
 ToDo:
----assets---
-- Feuerwerk Animation erstellen
-- Hand-Animationen für Minispiele
----code---
-- erkennen wenn die Aufgabe gelöst ist -done -> Screen mit der Vollständigen Aufgabe (z.B. 2 + 3 = 5), Feuerwerk Animation im Hintergrund
-- double tap bei Division)
+- nothing
+
