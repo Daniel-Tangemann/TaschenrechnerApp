@@ -92,6 +92,78 @@ local counterBar
 local clonerAnimTimer      = nil
 local clonerAnimLoopActive = false
 
+-- Hand-Tutorial (horizontal links -> rechts)
+local swipeHand
+local tutorialActive = false
+local swipeStartX, swipeEndX, swipeY
+
+-- Ergebnis / Win-Zoom
+local targetResult = 0
+local solved = false
+local machineStartX, machineStartY, machineStartScale
+local machineSolvedAnimating = false
+local solvedListenerAdded = false
+
+---------------------------------------------------------
+-- Hand-Tutorial starten / stoppen
+---------------------------------------------------------
+local function stopSwipeTutorial()
+    tutorialActive = false
+    if swipeHand then
+        transition.cancel(swipeHand)
+        swipeHand.alpha = 0
+    end
+end
+
+local function startSwipeTutorial(parentGroup)
+    if tutorialActive then return end
+    if not swipeStartX or not swipeEndX or not swipeY then
+        return -- Sicherheitsnetz
+    end
+
+    tutorialActive = true
+
+    if not swipeHand then
+        swipeHand = display.newImageRect(parentGroup, "imgs/Hand.png", 339, 450)
+        swipeHand.anchorX = 0.5
+        swipeHand.anchorY = 0.5
+        swipeHand.xScale  = 0.5
+        swipeHand.yScale  = 0.5
+        swipeHand.rotation = 0   -- Finger zeigt nach rechts
+        swipeHand.alpha   = 0
+    else
+        parentGroup:insert(swipeHand)
+    end
+
+    local function playNext()
+        if not tutorialActive or not swipeHand then return end
+
+        swipeHand.x = swipeStartX
+        swipeHand.y = swipeY
+        swipeHand.alpha = 1
+
+        transition.to(swipeHand, {
+            time       = 800,
+            x          = swipeEndX,
+            transition = easing.outQuad,
+            onComplete = function()
+                if not tutorialActive or not swipeHand then return end
+                transition.to(swipeHand, {
+                    time = 300,
+                    alpha = 0,
+                    onComplete = function()
+                        if tutorialActive then
+                            timer.performWithDelay(500, playNext)
+                        end
+                    end
+                })
+            end
+        })
+    end
+
+    playNext()
+end
+
 ---------------------------------------------------------
 -- Klonmaschinen-Sprite: idle / beam
 ---------------------------------------------------------
@@ -175,6 +247,30 @@ local function blinkCounterBar()
 end
 
 ---------------------------------------------------------
+-- Vorwärtsdeklaration für Win-Animation
+---------------------------------------------------------
+local function onSolved() end
+
+---------------------------------------------------------
+-- Ergebnis-Polling (wie bei Add/Sub)
+---------------------------------------------------------
+local function checkSolved()
+    if solved or not machine then
+        return
+    end
+
+    local current = machine.value or 0
+    if current == targetResult then
+        solved = true
+        onSolved()
+    end
+end
+
+local function enterFrameListener()
+    checkSolved()
+end
+
+---------------------------------------------------------
 -- Murmel in Klonmaschine "einsaugen" und Produkt zählen
 -- onDone: optionaler Callback (z.B. Balken)
 ---------------------------------------------------------
@@ -183,6 +279,7 @@ local function swallowIntoCloner(marble, onDone)
         return
     end
     marble.removed = true
+    stopSwipeTutorial()  -- Spieler hat verstanden → Tutorial ausblenden
 
     transition.to(marble, {
         time   = 180,
@@ -223,6 +320,45 @@ local function swallowIntoCloner(marble, onDone)
             end
         end
     })
+end
+
+---------------------------------------------------------
+-- Wenn Aufgabe gelöst: Maschine nach oben in die Mitte zoomen
+-- + Balken mit Magic Numbers justieren (hacky, aber hübsch)
+---------------------------------------------------------
+function onSolved()
+    stopSwipeTutorial()
+
+    if machineSolvedAnimating or not machine or not machine.group then
+        return
+    end
+    machineSolvedAnimating = true
+
+    local targetX     = display.contentCenterX
+    local targetY     = display.contentCenterY + 40
+    local targetScale = (machineStartScale or machine.group.xScale or 1) * 1.2
+
+    -- Maschine bewegen & skalieren
+    transition.to(machine.group, {
+        time       = 700,
+        x          = targetX,
+        y          = targetY,
+        xScale     = targetScale,
+        yScale     = targetScale,
+        transition = easing.outQuad
+    })
+
+    -- Balkengruppe mitbewegen & mitskalieren (Magic Numbers)
+    if segmentBarGroup then
+        transition.to(segmentBarGroup, {
+            time       = 700,
+            x          = -targetX + 450,
+            y          = -targetY + 342,
+            xScale     = targetScale,
+            yScale     = targetScale,
+            transition = easing.outQuad
+        })
+    end
 end
 
 ---------------------------------------------------------
@@ -383,6 +519,11 @@ function scene:create(event)
     local rightValue = params.right or 4
     multiplier       = rightValue or 1
 
+    targetResult           = leftValue * rightValue
+    solved                 = false
+    machineSolvedAnimating = false
+    solvedListenerAdded    = false
+
     -----------------------------------------------------
     -- Background
     -----------------------------------------------------
@@ -473,8 +614,9 @@ function scene:create(event)
     -- Double-Tap: auf linkem Bereich UND linkem Num-Hint
     -----------------------------------------------------
     local tapRadius = 1000
-    leftRect:addEventListener("tap", makeDoubleTapHandler(tapRadius))
-    numHintLeft:addEventListener("tap", makeDoubleTapHandler(tapRadius))
+    local doubleTapHandler = makeDoubleTapHandler(tapRadius)
+    leftRect:addEventListener("tap", doubleTapHandler)
+    numHintLeft:addEventListener("tap", doubleTapHandler)
 
     -----------------------------------------------------
     -- Murmeln links spawnen
@@ -516,7 +658,7 @@ function scene:create(event)
     cloneCenterY = clonerSprite.y - clonerSprite.height * 0.10
 
     -----------------------------------------------------
-    -- Swipe Hints
+    -- Swipe Hint (optisch)
     -----------------------------------------------------
     local swipe_hint_0_b = display.newImageRect( 
         sceneGroup, 
@@ -531,6 +673,13 @@ function scene:create(event)
     swipe_hint_0_b.rotation = 0
 
     -----------------------------------------------------
+    -- Koordinaten für die Hand-Animation (wie Subtrahieren)
+    -----------------------------------------------------
+    swipeStartX = display.contentCenterX - 200
+    swipeEndX   = display.contentCenterX + 200
+    swipeY      = display.contentCenterY - 200
+
+    -----------------------------------------------------
     -- Zählmaschine unten
     -----------------------------------------------------
     machine = CounterMachine.new(sceneGroup, {
@@ -539,6 +688,10 @@ function scene:create(event)
         scale = 0.8
     })
     machine:setValue(0)
+
+    machineStartX     = machine.group.x
+    machineStartY     = machine.group.y
+    machineStartScale = machine.group.xScale or 1
 
     -----------------------------------------------------
     -- Voller Balken unter den Rollen (wie Divisor = 1)
@@ -607,6 +760,14 @@ function scene:create(event)
     )
     arrow.x = backBtn.group.x
     arrow.y = backBtn.group.y
+
+    -----------------------------------------------------
+    -- Ergebnis-Listener / Hand-Tutorial aktivieren
+    -----------------------------------------------------
+    Runtime:addEventListener("enterFrame", enterFrameListener)
+    solvedListenerAdded = true
+
+    startSwipeTutorial(sceneGroup)
 end
 
 function scene:show(event)
@@ -617,6 +778,12 @@ end
 
 function scene:destroy(event)
     stopClonerBeamLoop()
+    stopSwipeTutorial()
+
+    if solvedListenerAdded then
+        Runtime:removeEventListener("enterFrame", enterFrameListener)
+        solvedListenerAdded = false
+    end
 
     for i = #marbles, 1, -1 do
         local m = marbles[i]
@@ -635,6 +802,11 @@ function scene:destroy(event)
     end
     segmentBarGroup = nil
     counterBar      = nil
+
+    if swipeHand and swipeHand.removeSelf then
+        swipeHand:removeSelf()
+    end
+    swipeHand = nil
 
     numHintLeft  = nil
     numHintRight = nil

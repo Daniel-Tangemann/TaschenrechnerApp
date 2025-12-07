@@ -110,6 +110,172 @@ local restSlots = {}
 local pendingUnits    = 0
 local isCountingUnits = false
 
+-- Double-Tap-Status
+local doubleTapUsed = false
+
+-- Sieg / Zoom-Animation
+local quotientTarget   = 0
+local remainderTarget  = 0
+local solved           = false
+local machineStartX    = 0
+local machineStartY    = 0
+local machineStartScale = 1
+local machineSolvedAnimating = false
+local solvedListenerAdded    = false
+
+-- Hand-Tutorial: vertikal (wie Addieren) + horizontal (wie Subtrahieren)
+local swipeHand
+local tutorialActive      = false
+local swipeVertX          -- x für vertikale Geste
+local swipeVertStartY     -- y-Start (oben)
+local swipeVertEndY       -- y-Ziel (unten, in Richtung Maschine)
+local swipeHorzStartX     -- horizontaler Start (links)
+local swipeHorzEndX       -- horizontaler Endpunkt (rechts)
+local swipeHorzY          -- konstantes y für horizontale Geste
+
+-- Vorwärts-Deklarationen
+local marbleTouch
+local onSolved
+local enterFrameListener
+
+---------------------------------------------------------
+-- Hand-Tutorial: stoppen
+---------------------------------------------------------
+local function stopSwipeTutorial()
+    tutorialActive = false
+    if swipeHand then
+        transition.cancel(swipeHand)
+        swipeHand.alpha = 0
+    end
+end
+
+---------------------------------------------------------
+-- Hand-Tutorial: starten (linke Geste wie Addieren,
+-- rechte Geste wie Subtrahieren, abwechselnd)
+---------------------------------------------------------
+local function startSwipeTutorial(parentGroup)
+    if tutorialActive then return end
+
+    local modes = {}
+
+    if swipeVertX and swipeVertStartY and swipeVertEndY then
+        modes[#modes + 1] = "vertical"
+    end
+    if swipeHorzStartX and swipeHorzEndX and swipeHorzY then
+        modes[#modes + 1] = "horizontal"
+    end
+
+    if #modes == 0 then
+        return
+    end
+
+    tutorialActive = true
+
+    if not swipeHand then
+        swipeHand = display.newImageRect(parentGroup, "imgs/Hand.png", 339, 450)
+        swipeHand.anchorX = 0.5
+        swipeHand.anchorY = 0.5
+        swipeHand.xScale  = 0.5
+        swipeHand.yScale  = 0.5
+        swipeHand.alpha   = 0
+    else
+        parentGroup:insert(swipeHand)
+    end
+
+    local idx = 1
+
+    local function playNext()
+        if not tutorialActive or not swipeHand then return end
+
+        local mode = modes[idx]
+        idx = (idx % #modes) + 1
+
+        if mode == "vertical" then
+            swipeHand.rotation = 180  -- Finger nach unten
+            swipeHand.x = swipeVertX
+            swipeHand.y = swipeVertStartY
+            swipeHand.alpha = 1
+
+            transition.to(swipeHand, {
+                time       = 800,
+                y          = swipeVertEndY,
+                transition = easing.outQuad,
+                onComplete = function()
+                    if not tutorialActive or not swipeHand then return end
+                    transition.to(swipeHand, {
+                        time = 300,
+                        alpha = 0,
+                        onComplete = function()
+                            if tutorialActive then
+                                timer.performWithDelay(500, playNext)
+                            end
+                        end
+                    })
+                end
+            })
+        else
+            swipeHand.rotation = 0    -- Finger nach rechts
+            swipeHand.x = swipeHorzStartX
+            swipeHand.y = swipeHorzY
+            swipeHand.alpha = 1
+
+            transition.to(swipeHand, {
+                time       = 800,
+                x          = swipeHorzEndX,
+                transition = easing.outQuad,
+                onComplete = function()
+                    if not tutorialActive or not swipeHand then return end
+                    transition.to(swipeHand, {
+                        time = 300,
+                        alpha = 0,
+                        onComplete = function()
+                            if tutorialActive then
+                                timer.performWithDelay(500, playNext)
+                            end
+                        end
+                    })
+                end
+            })
+        end
+    end
+
+    playNext()
+end
+
+---------------------------------------------------------
+-- Hilfsfunktion: Murmel programmatisch ins Restfeld verschieben
+---------------------------------------------------------
+local function moveMarbleToRest(m, unitsOverride)
+    if m.removed or not remainderRect then return false end
+
+    local units = unitsOverride or tonumber(m.countValue) or 1
+    if units < 1 then units = 1 end
+
+    -- Sicherheitscheck: Rest darf mathematischen Rest nicht überschreiten
+    if remainderUnits + units > maxRemainderUnits then
+        return false
+    end
+
+    remainderUnits = remainderUnits + units
+    remainderCount = remainderCount + 1
+
+    local slot = restSlots[remainderCount] or { x = remainderRect.x, y = remainderRect.y }
+
+    m.inRemainder = true
+
+    transition.to(m, {
+        time = 150,
+        x    = slot.x,
+        y    = slot.y,
+        onComplete = function()
+            m.inRemainder = true
+            m:removeEventListener("touch", marbleTouch)
+        end
+    })
+
+    return true
+end
+
 ---------------------------------------------------------
 -- Hilfsfunktion: Punkt in Rechteck?
 ---------------------------------------------------------
@@ -176,7 +342,6 @@ end
 
 ---------------------------------------------------------
 -- Wenn eine Murmel (mit Wert amount) gezählt wurde
--- amount: wie viele "Einheiten" die Murmel repräsentiert
 -- → Einheiten werden nacheinander animiert abgearbeitet
 ---------------------------------------------------------
 local function onMarbleCounted(amount)
@@ -198,6 +363,8 @@ local function swallowIntoMachine(m)
     if m.removed then return end
     m.removed = true
 
+    stopSwipeTutorial()  -- Spieler hat verstanden
+
     local units = tonumber(m.countValue) or 1
     if units < 1 then units = 1 end
 
@@ -217,9 +384,82 @@ local function swallowIntoMachine(m)
 end
 
 ---------------------------------------------------------
+-- Sieg-Logik: prüfen, ob Aufgabe gelöst ist
+---------------------------------------------------------
+local function checkSolved()
+    if solved or not machine then
+        return
+    end
+
+    local currentQ = machine.value or 0
+
+    -- Quotient und Rest müssen stimmen
+    if currentQ ~= quotientTarget then
+        return
+    end
+    if remainderUnits ~= remainderTarget then
+        return
+    end
+
+    -- Keine "freien" Murmeln mehr: alles ist entweder entfernt oder im Rest
+    for _, m in ipairs(marbles) do
+        if m and (not m.removed) and (not m.inRemainder) then
+            return
+        end
+    end
+
+    solved = true
+    onSolved()
+end
+
+function enterFrameListener()
+    checkSolved()
+end
+
+---------------------------------------------------------
+-- Wenn Aufgabe gelöst: Maschine in die Mitte zoomen
+-- + Segmentbalken mit Magic Numbers mitbewegen
+---------------------------------------------------------
+function onSolved()
+    stopSwipeTutorial()
+
+    if machineSolvedAnimating or not machine or not machine.group then
+        return
+    end
+    machineSolvedAnimating = true
+
+    local targetX     = display.contentCenterX
+    local targetY     = display.contentCenterY + 40
+    local baseScale   = machineStartScale or machine.group.xScale or 1
+    local targetScale = baseScale * 1.2
+
+    -- Maschine bewegen & skalieren
+    transition.to(machine.group, {
+        time       = 700,
+        x          = targetX,
+        y          = targetY,
+        xScale     = targetScale,
+        yScale     = targetScale,
+        transition = easing.outQuad
+    })
+
+    -- Balkengruppe mit Magic Numbers nachziehen (hacky, aber hübsch)
+    if segmentBarGroup then
+        transition.to(segmentBarGroup, {
+            time       = 700,
+            x          = -targetX + 450,
+            y          = -targetY + 342,
+            xScale     = targetScale,
+            yScale     = targetScale,
+            transition = easing.outQuad
+        })
+    end
+end
+
+---------------------------------------------------------
 -- Touch-Listener für Murmeln
 ---------------------------------------------------------
-local function marbleTouch(event)
+function marbleTouch(event)
     local m = event.target
     if m.removed then return end
 
@@ -260,18 +500,20 @@ local function marbleTouch(event)
                     remainderUnits = remainderUnits + units
                     remainderCount = remainderCount + 1
 
-                    -- Slot anhand remainderCount auswählen (1-basiert)
                     local slot = restSlots[remainderCount]
                     if not slot then
-                        -- Fallback: Mitte des Restfelds
                         slot = { x = remainderRect.x, y = remainderRect.y }
                     end
+
+                    m.inRemainder = true
+                    stopSwipeTutorial()  -- auch Rest-Aktion stoppt Tutorial
 
                     transition.to(m, {
                         time = 100,
                         x    = slot.x,
                         y    = slot.y,
                         onComplete = function()
+                            m.inRemainder = true
                             m:removeEventListener("touch", marbleTouch)
                         end
                     })
@@ -317,6 +559,7 @@ local function spawnMarbles(sceneGroup, num, rect)
         m.spawnY = y
         m.removed = false
         m.countValue = countValue or 1
+        m.inRemainder = false
 
         if color then
             m:setFillColor(color[1], color[2], color[3])
@@ -347,6 +590,87 @@ local function spawnMarbles(sceneGroup, num, rect)
         end
         createColoredMarble(pos[1], pos[2], tensColor, tensValue)
     end
+end
+
+---------------------------------------------------------
+-- Double-Tap auf Num-Hint: automatisch teilen
+---------------------------------------------------------
+local function onNumHintDoubleTap(event)
+    -- Wir reagieren nur auf echtes Doppeltippen
+    if event.numTaps ~= 2 then
+        return true
+    end
+
+    -- Nur einmal pro Szene ausführen
+    if doubleTapUsed then
+        return true
+    end
+    doubleTapUsed = true
+
+    stopSwipeTutorial()
+
+    -- Wie viele Einheiten sollen insgesamt im Rest liegen?
+    local targetRemainder = maxRemainderUnits
+    if targetRemainder < 0 then targetRemainder = 0 end
+
+    -- Wieviel Rest ist schon manuell gelegt?
+    local currentRemainder = remainderUnits or 0
+    local neededRemainder  = targetRemainder - currentRemainder
+
+    if neededRemainder < 0 then
+        neededRemainder = 0
+    end
+
+    -- Kandidaten sammeln: Einer-Murmeln, die noch nicht entfernt
+    -- und noch nicht im Rest liegen, sowie alle übrigen.
+    local ones = {}
+    local others = {}
+
+    for _, m in ipairs(marbles) do
+        if m and (not m.removed) and (not m.inRemainder) then
+            local units = tonumber(m.countValue) or 1
+            if units == 1 then
+                table.insert(ones, m)
+            else
+                table.insert(others, m)
+            end
+        end
+    end
+
+    -- Falls wir nicht genug Einer-Murmeln für den Rest haben,
+    -- brechen wir lieber ab, statt Unsinn zu animieren.
+    if neededRemainder > #ones then
+        doubleTapUsed = false
+        return true
+    end
+
+    -------------------------------------------------
+    -- 1) Genau so viele Einer-Murmeln in den Rest legen,
+    --    wie der mathematische Rest noch braucht.
+    -------------------------------------------------
+    local assigned = 0
+    for i = 1, #ones do
+        if assigned >= neededRemainder then
+            break
+        end
+        local m = ones[i]
+        local ok = moveMarbleToRest(m, 1)
+        if ok then
+            assigned = assigned + 1
+        end
+    end
+
+    -------------------------------------------------
+    -- 2) Alle übrigen Murmeln (einschließlich nicht
+    --    verwendeter Einer) durch die Maschine laufen lassen.
+    -------------------------------------------------
+    for _, m in ipairs(marbles) do
+        if m and (not m.removed) and (not m.inRemainder) then
+            swallowIntoMachine(m)
+        end
+    end
+
+    return true
 end
 
 ---------------------------------------------------------
@@ -385,6 +709,10 @@ function scene:create(event)
     groupCount        = 0
     pendingUnits      = 0
     isCountingUnits   = false
+    solved            = false
+    machineSolvedAnimating = false
+    solvedListenerAdded    = false
+    doubleTapUsed     = false
 
     local params     = event.params or {}
     local leftValue  = params.left  or 10
@@ -393,6 +721,8 @@ function scene:create(event)
     if divisor < 1 then divisor = 1 end
 
     maxRemainderUnits = leftValue % divisor  -- mathematisch korrekter Rest
+    quotientTarget    = math.floor(leftValue / divisor)
+    remainderTarget   = maxRemainderUnits
 
     -----------------------------------------------------
     -- Hintergrund
@@ -468,6 +798,10 @@ function scene:create(event)
     numHintRight.yScale = 1.6
     numHintRight:setFrame(rightFrame)
 
+    -- Double-Tap-Listener hinzufügen (auf beide Hints)
+    numHintLeft:addEventListener("tap", onNumHintDoubleTap)
+    numHintRight:addEventListener("tap", onNumHintDoubleTap)
+
     -----------------------------------------------------
     -- Rest-Slots vorberechnen
     -----------------------------------------------------
@@ -505,6 +839,17 @@ function scene:create(event)
     swipe_hint_0_b.yScale = 0.5
     swipe_hint_0_b.rotation = 0
 
+    -- Koordinaten für Hand-Animation:
+    -- Links (wie Addieren): vertikal nach unten
+    swipeVertX      = swipe_hint_90_a.x
+    swipeVertStartY = swipe_hint_90_a.y - 40
+    -- End-Y gibt es später, wenn Maschine erstellt ist
+
+    -- Rechts (wie Subtrahieren): horizontal von links nach rechts
+    swipeHorzStartX = display.contentCenterX - 200
+    swipeHorzEndX   = display.contentCenterX + 200
+    swipeHorzY      = display.contentCenterY - 200
+
     -----------------------------------------------------
     -- Zählmaschine unten
     -----------------------------------------------------
@@ -514,6 +859,10 @@ function scene:create(event)
         scale = 0.8
     })
     machine:setValue(0)
+
+    machineStartX     = machine.group.x
+    machineStartY     = machine.group.y
+    machineStartScale = machine.group.xScale or 1
 
     -----------------------------------------------------
     -- Schlucklinie dynamisch aus Trichterposition
@@ -552,6 +901,9 @@ function scene:create(event)
     end
 
     updateSegmentBar()
+
+    -- End-Y für vertikale Hand (wie bei Addieren)
+    swipeVertEndY = machine.group.y - bodyH * 0.2
 
     -----------------------------------------------------
     -- Hilfe-Button
@@ -599,10 +951,25 @@ function scene:create(event)
     )
     arrow.x = backBtn.group.x 
     arrow.y = backBtn.group.y
+
+    -----------------------------------------------------
+    -- Ergebnis-Listener + Hand-Tutorial aktivieren
+    -----------------------------------------------------
+    Runtime:addEventListener("enterFrame", enterFrameListener)
+    solvedListenerAdded = true
+
+    startSwipeTutorial(sceneGroup)
 end
 
 ---------------------------------------------------------
 function scene:destroy(event)
+    if solvedListenerAdded then
+        Runtime:removeEventListener("enterFrame", enterFrameListener)
+        solvedListenerAdded = false
+    end
+
+    stopSwipeTutorial()
+
     for i = #marbles, 1, -1 do
         local m = marbles[i]
         if m.removeSelf then m:removeSelf() end
@@ -616,6 +983,14 @@ function scene:destroy(event)
     segmentBarGroup = nil
     segmentRects    = {}
     restSlots       = {}
+
+    machine = nil
+    remainderRect = nil
+
+    if swipeHand and swipeHand.removeSelf then
+        swipeHand:removeSelf()
+    end
+    swipeHand = nil
 
     numHintLeft  = nil
     numHintRight = nil

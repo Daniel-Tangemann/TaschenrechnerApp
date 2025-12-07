@@ -106,7 +106,7 @@ function Display.new(parentGroup)
     -- [Slot1][Slot2][Slot3][Slot4] = [D1][D2][OP][D3]
     local yPos  = -h * 0.05
 
-    local shiftX = 0   -- alles 314 px nach links
+    local shiftX = 0   -- ggf. nach links/rechts schieben
 
     local slotX = {
         -1.5 * slotSpacing + shiftX,
@@ -115,6 +115,48 @@ function Display.new(parentGroup)
         1.5 * slotSpacing + shiftX,
     }
 
+    self.slotX = slotX
+    self.slotY = yPos
+
+    --------------------------------------------------------
+    -- Platzhalter (graue 8-8-Operator-8) im Hintergrund
+    --------------------------------------------------------
+    self.placeholderGroup = display.newGroup()
+    self.group:insert(self.placeholderGroup)  -- kommt direkt vor Ziffern/Operatoren
+
+    self.placeholderDigits = {}
+
+    local function makeDigitPlaceholder(slotIndex)
+        local spr = display.newSprite(self.placeholderGroup, self.digitSheet, self.digitSeqData)
+        spr.x = slotX[slotIndex]
+        spr.y = yPos
+        spr.xScale, spr.yScale = digitScale, digitScale
+        -- 8 → Frame 9 (0..9 → 1..10)
+        spr:setFrame(8 + 1)
+        spr:setFillColor(1, 1, 1, 0.18)  -- hell & leicht transparent
+        self.placeholderDigits[#self.placeholderDigits + 1] = spr
+    end
+
+    -- D1, D2, D3 als 8
+    makeDigitPlaceholder(1)
+    makeDigitPlaceholder(2)
+    makeDigitPlaceholder(4)
+
+    -- Operator-Platzhalter (Text mit allen vier Operatoren)
+    local opPlaceholder = display.newText({
+        parent   = self.placeholderGroup,
+        text     = "+ − × ÷",
+        x        = slotX[3],
+        y        = yPos,
+        font     = native.systemFontBold,
+        fontSize = DIGIT_FRAME_H * digitScale * 0.35,  -- ungefähr passend zu den Sprites
+        align    = "center"
+    })
+    opPlaceholder:setFillColor(1, 1, 1, 0.18)
+
+    --------------------------------------------------------
+    -- Aktive Ziffern- und Operator-Sprites (liegen über den Platzhaltern)
+    --------------------------------------------------------
     self.digitSprites = {}
 
     -- D1 (links)
@@ -143,13 +185,14 @@ function Display.new(parentGroup)
 
     -- Operator-Sprite in Slot 3
     self.opSprite = display.newSprite(self.group, self.opSheet, self.opSeqData)
-    self.opSprite.x = slotX[3] 
+    self.opSprite.x = slotX[3]
     self.opSprite.y = yPos
 
-    -- Operator-Skalierung hinzufügen:
-    local opScale = self.digitScale * 1.5   -- halb so groß wie die Ziffern
+    -- Operator-Skalierung
+    local opScale = self.digitScale * 1.5
     self.opSprite.xScale = opScale
     self.opSprite.yScale = opScale
+    self.opSprite.isVisible = false
 
     --------------------------------------------------------
     -- Optionale Textanzeige für Fehler / Debug (klein)
@@ -227,7 +270,7 @@ function Display:setExpression(left, op, right)
     -- Fehlertext ausblenden, wenn wir normalen Ausdruck setzen
     self.errorText.isVisible = false
 
-    -- Alle ausblenden
+    -- Alle aktiven Sprites ausblenden
     setDigitSprite(self, 1, nil)
     setDigitSprite(self, 2, nil)
     setDigitSprite(self, 3, nil)
@@ -256,8 +299,7 @@ function Display:setExpression(left, op, right)
 end
 
 ------------------------------------------------------------------
--- Ergebnis-API brauchst du aktuell nicht,
--- wir lassen es als Stub für später.
+-- Ergebnis-API (derzeit ungenutzt)
 ------------------------------------------------------------------
 function Display:setResult(resultStr)
     -- momentan NICHT genutzt – Ergebnis bleibt intern

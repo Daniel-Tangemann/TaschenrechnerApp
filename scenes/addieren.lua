@@ -98,6 +98,16 @@ local rootGroup
 local resultPopupGroup
 local solvedListenerAdded = false
 
+-- Hand-Tutorial
+local swipeHand
+local tutorialActive = false
+local swipeStartLeftX, swipeStartRightX, swipeStartY
+local swipeEndY
+
+-- Maschinen-Position/Skalierung für Win-Animation
+local machineStartX, machineStartY, machineStartScale
+local machineSolvedAnimating = false
+
 ---------------------------------------------------------
 -- Hilfsfunktionen: Ergebnis-Popup
 ---------------------------------------------------------
@@ -140,6 +150,75 @@ local function showResultPopup()
 end
 
 ---------------------------------------------------------
+-- Hand-Tutorial: starten / stoppen
+---------------------------------------------------------
+local function stopSwipeTutorial()
+    tutorialActive = false
+    if swipeHand then
+        transition.cancel(swipeHand)
+        swipeHand.alpha = 0
+    end
+end
+
+local function startSwipeTutorial(parentGroup)
+    if tutorialActive then return end
+    if not swipeStartLeftX or not swipeStartRightX or not swipeStartY or not swipeEndY then
+        return -- Sicherheitsnetz, falls Koordinaten noch nicht gesetzt
+    end
+
+    tutorialActive = true
+
+    if not swipeHand then
+        swipeHand = display.newImageRect(parentGroup, "imgs/Hand.png", 339, 450)
+        swipeHand.anchorX = 0.5
+        swipeHand.anchorY = 0.5
+        swipeHand.xScale  = 0.5
+        swipeHand.yScale  = 0.5
+        swipeHand.rotation = 180   -- Finger zeigt nach unten
+        swipeHand.alpha   = 0
+    else
+        parentGroup:insert(swipeHand)
+    end
+
+    local paths = {
+        { x = swipeStartLeftX },
+        { x = swipeStartRightX },
+    }
+    local idx = 1
+
+    local function playNext()
+        if not tutorialActive or not swipeHand or not machine then return end
+
+        local p = paths[idx]
+        idx = (idx % #paths) + 1
+
+        swipeHand.x = p.x
+        swipeHand.y = swipeStartY
+        swipeHand.alpha = 1
+
+        transition.to(swipeHand, {
+            time = 800,
+            y = swipeEndY,
+            transition = easing.outQuad,
+            onComplete = function()
+                if not tutorialActive or not swipeHand then return end
+                transition.to(swipeHand, {
+                    time = 300,
+                    alpha = 0,
+                    onComplete = function()
+                        if tutorialActive then
+                            timer.performWithDelay(500, playNext)
+                        end
+                    end
+                })
+            end
+        })
+    end
+
+    playNext()
+end
+
+---------------------------------------------------------
 -- Balken kurz aufblinken lassen, wenn gezählt wurde
 ---------------------------------------------------------
 local function blinkCounterBar()
@@ -168,7 +247,59 @@ local function swallowMarbleIntoMachine(marble)
     if not machine or not marble or marble.removed then
         return
     end
+    stopSwipeTutorial()  -- Tutorial ausblenden, sobald der Spieler mitspielt
     machine:swallowMarble(marble, blinkCounterBar)
+end
+
+---------------------------------------------------------
+-- Wenn Aufgabe gelöst: Maschine in die Mitte zoomen
+---------------------------------------------------------
+local function onSolved()
+    stopSwipeTutorial()
+
+    if machineSolvedAnimating or not machine or not machine.group then
+        return
+    end
+    machineSolvedAnimating = true
+
+    -------------------------------------------------------
+    -- Zielpositionen der Maschine
+    -------------------------------------------------------
+    local targetX = display.contentCenterX
+    local targetY = display.contentCenterY + 40
+    local targetScale = machineStartScale * 1.2
+
+    -------------------------------------------------------
+    -- Verschiebung berechnen
+    -------------------------------------------------------
+    local dx = targetX - machineStartX
+    local dy = targetY - machineStartY
+
+    -------------------------------------------------------
+    -- Maschine bewegen & skalieren
+    -------------------------------------------------------
+    transition.to(machine.group, {
+        time       = 700,
+        x          = targetX,
+        y          = targetY,
+        xScale     = targetScale,
+        yScale     = targetScale,
+        transition = easing.outQuad
+    })
+
+    -------------------------------------------------------
+    -- Balkengruppe exakt gleich bewegen & skalieren
+    -------------------------------------------------------
+    if segmentBarGroup then
+        transition.to(segmentBarGroup, {
+            time       = 700,
+            x          = -targetX +450, --segmentBarGroup.x0 + dx,
+            y          = -targetY +342, --segmentBarGroup.y0 + dy,
+            xScale     = targetScale,
+            yScale     = targetScale,
+            transition = easing.outQuad
+        })
+    end
 end
 
 ---------------------------------------------------------
@@ -182,7 +313,8 @@ local function checkSolved()
     local current = machine.value or 0
     if current == targetResult then
         solved = true
-        showResultPopup()
+        onSolved()
+        -- showResultPopup()  -- fällt weg
     end
 end
 
@@ -375,6 +507,10 @@ function scene:create(event)
     swipe_hint_90_b.yScale = 0.5
     swipe_hint_90_b.rotation = 90
 
+    -- Koordinaten für die Hand-Animation merken
+    swipeStartRightX = swipe_hint_90_a.x
+    swipeStartLeftX  = swipe_hint_90_b.x
+    swipeStartY      = swipe_hint_90_a.y - 40
     -----------------------------------------------------
     -- Banner / Titel oben
     -----------------------------------------------------
@@ -435,18 +571,14 @@ function scene:create(event)
     local leftFrame  = clampToHintRange(leftValue)  + 1
     local rightFrame = clampToHintRange(rightValue) + 1
 
-    numHintLeft = display.newSprite(sceneGroup, numHintSheet, {
-        { name = "static", start = 1, count = 1, time = 0 }
-    })
+    numHintLeft = display.newSprite(sceneGroup, numHintSheet, { start = leftFrame, count = 1 })
     numHintLeft.x = leftRect.x
     numHintLeft.y = leftRect.y - (areaHeightTop * 0.5) - 40
     numHintLeft.xScale = 1.6
     numHintLeft.yScale = 1.6
     numHintLeft:setFrame(leftFrame)
 
-    numHintRight = display.newSprite(sceneGroup, numHintSheet, {
-        { name = "static", start = 1, count = 1, time = 0 }
-    })
+    numHintRight = display.newSprite(sceneGroup, numHintSheet, { start = rightFrame, count = 1 })
     numHintRight.x = rightRect.x
     numHintRight.y = rightRect.y - (areaHeightTop * 0.5) - 40
     numHintRight.xScale = 1.6
@@ -470,18 +602,27 @@ function scene:create(event)
     -----------------------------------------------------
     -- Zählmaschine unten
     -----------------------------------------------------
-    machine = CounterMachine.new(sceneGroup, {
+        machine = CounterMachine.new(sceneGroup, {
         x     = display.contentCenterX,
         y     = display.contentHeight * 0.72,
         scale = 0.8
     })
     machine:setValue(0)
 
+    machineStartX     = machine.group.x
+    machineStartY     = machine.group.y
+    machineStartScale = machine.group.xScale or 1
+
     -----------------------------------------------------
     -- Voller Balken unter den Rollen (nicht segmentiert)
     -----------------------------------------------------
     segmentBarGroup = display.newGroup()
     sceneGroup:insert(segmentBarGroup)
+
+    -- diese beiden neuen Zeilen:
+    segmentBarGroup.x0 = 0
+    segmentBarGroup.y0 = 0
+    segmentBarGroup.scale0 = 1
 
     local bodyW = machine.body.width
     local bodyH = machine.body.height
@@ -497,6 +638,8 @@ function scene:create(event)
     counterBar = display.newRoundedRect(segmentBarGroup, barX, barY, barWidth - 6, barHeight - 6, 8)
     counterBar:setFillColor(0.2, 0.2, 0.35)
     counterBar.alpha = 0.7
+
+    swipeEndY = machine.group.y - bodyH * 0.2
 
     -----------------------------------------------------
     -- Hilfe-Button (Fragezeichen oben rechts)
@@ -550,6 +693,9 @@ function scene:create(event)
     -----------------------------------------------------
     Runtime:addEventListener("enterFrame", enterFrameListener)
     solvedListenerAdded = true
+
+    -- Hand-Tutorial starten
+    startSwipeTutorial(sceneGroup)
 end
 
 function scene:show(event)
@@ -588,6 +734,12 @@ function scene:destroy(event)
         resultPopupGroup:removeSelf()
     end
     resultPopupGroup = nil
+
+    stopSwipeTutorial()
+    if swipeHand and swipeHand.removeSelf then
+        swipeHand:removeSelf()
+    end
+    swipeHand = nil
 end
 
 scene:addEventListener("create", scene)

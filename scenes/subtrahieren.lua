@@ -92,6 +92,79 @@ local machine          -- CounterMachine-Instanz
 local segmentBarGroup  -- Gruppe für den Balken
 local counterBar       -- einzelner, voller Balken
 
+-- Ergebnis-Erkennung
+local targetResult = 0
+local solved       = false
+
+-- Hand-Tutorial (nur horizontal: links -> rechts)
+local swipeHand
+local tutorialActive = false
+local swipeStartX, swipeEndX, swipeY
+
+-- Maschinen-Position/Skalierung für Win-Animation
+local machineStartX, machineStartY, machineStartScale
+local machineSolvedAnimating = false
+
+---------------------------------------------------------
+-- Hand-Tutorial starten / stoppen
+---------------------------------------------------------
+local function stopSwipeTutorial()
+    tutorialActive = false
+    if swipeHand then
+        transition.cancel(swipeHand)
+        swipeHand.alpha = 0
+    end
+end
+
+local function startSwipeTutorial(parentGroup)
+    if tutorialActive then return end
+    if not swipeStartX or not swipeEndX or not swipeY then
+        return -- Sicherheitsnetz
+    end
+
+    tutorialActive = true
+
+    if not swipeHand then
+        swipeHand = display.newImageRect(parentGroup, "imgs/Hand.png", 339, 450)
+        swipeHand.anchorX = 0.5
+        swipeHand.anchorY = 0.5
+        swipeHand.xScale  = 0.5
+        swipeHand.yScale  = 0.5
+        swipeHand.rotation = 0   -- Finger zeigt nach rechts
+        swipeHand.alpha   = 0
+    else
+        parentGroup:insert(swipeHand)
+    end
+
+    local function playNext()
+        if not tutorialActive or not swipeHand then return end
+
+        swipeHand.x = swipeStartX
+        swipeHand.y = swipeY
+        swipeHand.alpha = 1
+
+        transition.to(swipeHand, {
+            time       = 800,
+            x          = swipeEndX,
+            transition = easing.outQuad,
+            onComplete = function()
+                if not tutorialActive or not swipeHand then return end
+                transition.to(swipeHand, {
+                    time = 300,
+                    alpha = 0,
+                    onComplete = function()
+                        if tutorialActive then
+                            timer.performWithDelay(500, playNext)
+                        end
+                    end
+                })
+            end
+        })
+    end
+
+    playNext()
+end
+
 ---------------------------------------------------------
 -- Balken kurz aufblinken lassen, wenn gezählt wurde
 ---------------------------------------------------------
@@ -147,8 +220,6 @@ end
 
 ---------------------------------------------------------
 -- Eine Einer-Murmel aus einer Bündel-Murmel spawnen
--- (max. 9 Spawn-Murmeln pro Bündel, und nur solange
---  noch "remainingValue" vorhanden ist)
 ---------------------------------------------------------
 local function spawnOneFromBundle(bundleMarble)
     if not bundleMarble or bundleMarble.removed then
@@ -158,12 +229,10 @@ local function spawnOneFromBundle(bundleMarble)
     bundleMarble.spawnedOnes    = bundleMarble.spawnedOnes or 0
     bundleMarble.remainingValue = bundleMarble.remainingValue or bundleMarble.totalValue or 0
 
-    -- wenn kein Wert mehr übrig ist, nichts mehr spawnen
     if bundleMarble.remainingValue <= 0 then
         return
     end
 
-    -- Hard-Limit 9 Spawn-Murmeln (wie vorher)
     if bundleMarble.spawnedOnes >= 9 then
         return
     end
@@ -181,7 +250,6 @@ local function spawnOneFromBundle(bundleMarble)
         266 * 0.6
     )
 
-    -- in der Nähe der Bündel-Murmel spawnen
     local dx = math.random(-40, 40)
     local dy = math.random(30, 80)
 
@@ -234,7 +302,6 @@ local function marbleTouch(event)
             display.getCurrentStage():setFocus(nil)
             target.isFocus = false
 
-            -- Sicherheitsnetz: falls Spawn nicht gesetzt wurde
             target.spawnX = target.spawnX or target.x
             target.spawnY = target.spawnY or target.y
 
@@ -245,13 +312,13 @@ local function marbleTouch(event)
             local thresholdY = display.contentHeight * 0.5
 
             if machine and areAllSlotsFilled() and target.y >= thresholdY then
-                -- Wenn Bündel: nur den noch übrig gebliebenen Wert zählen
                 if target.isBundle then
                     local remaining = target.remainingValue or target.totalValue or 0
                     if remaining < 0 then remaining = 0 end
                     target.countValue = remaining
                 end
 
+                stopSwipeTutorial()
                 machine:swallowMarble(target, function()
                     blinkCounterBar()
                 end)
@@ -259,8 +326,7 @@ local function marbleTouch(event)
             end
 
             ------------------------------------------------
-            -- 2) Bündel-Murmel: NICHT in Slots einrasten,
-            --    sondern Eine-Murmel spawnen + zurückspringen
+            -- 2) Bündel-Murmel: Eine-Murmel spawnen + zurückspringen
             ------------------------------------------------
             if target.isBundle then
                 spawnOneFromBundle(target)
@@ -311,7 +377,7 @@ end
 _G.sub_m_arbleTouch = marbleTouch
 
 ---------------------------------------------------------
--- Double-Tap-Handler (nur über Num-Hint)
+-- Double-Tap-Handler (nur über linken Num-Hint)
 ---------------------------------------------------------
 local function makeDoubleTapHandler(radius)
     local lastTapTime = 0
@@ -372,6 +438,7 @@ local function makeDoubleTapHandler(radius)
                             end
                         else
                             -- alle Slots sind voll → Murmel in die Maschine
+                            stopSwipeTutorial()
                             machine:swallowMarble(m, function()
                                 blinkCounterBar()
                             end)
@@ -413,7 +480,6 @@ local function spawnMarbles(sceneGroup, num, containerRect, side)
             m:setFillColor(color[1], color[2], color[3])
         end
 
-        -- Bündel bekommt ein "Guthaben"
         if m.isBundle then
             m.totalValue     = m.countValue or 0
             m.remainingValue = m.totalValue
@@ -453,8 +519,6 @@ local function spawnMarbles(sceneGroup, num, containerRect, side)
             end
             createColoredMarble(pos[1], pos[2], tensColor, tensValue, true)
         end
-    else
-        -- rechte Seite wird hier nicht benutzt (Slots sind dort)
     end
 end
 
@@ -490,14 +554,80 @@ local function spawnSlots(sceneGroup, num)
 end
 
 ---------------------------------------------------------
+-- Wenn Aufgabe gelöst: Maschine in die Mitte zoomen
+---------------------------------------------------------
+local function onSolved()
+    stopSwipeTutorial()
+
+    if machineSolvedAnimating or not machine or not machine.group then
+        return
+    end
+    machineSolvedAnimating = true
+
+    local targetX = display.contentCenterX
+    local targetY = display.contentCenterY + 40
+    local targetScale = machineStartScale * 1.2
+
+    local dx = targetX - machineStartX
+    local dy = targetY - machineStartY
+
+    -- Maschine bewegen & skalieren
+    transition.to(machine.group, {
+        time       = 700,
+        x          = targetX,
+        y          = targetY,
+        xScale     = targetScale,
+        yScale     = targetScale,
+        transition = easing.outQuad
+    })
+
+    -- Balkengruppe mit Magic Numbers justieren & skalieren
+    if segmentBarGroup then
+        -- NOTE: Magic Numbers zum Ausrichten des Balkens relativ zur Maschine.
+        -- -targetX + 450 und -targetY + 342 sind empirisch bestimmte Offsets,
+        -- damit der Balken beim Zoom mit der Maschine deckungsgleich bleibt.
+        transition.to(segmentBarGroup, {
+            time       = 700,
+            x          = -targetX + 450,
+            y          = -targetY + 342,
+            xScale     = targetScale,
+            yScale     = targetScale,
+            transition = easing.outQuad
+        })
+    end
+end
+
+---------------------------------------------------------
+-- Ergebnis-Polling
+---------------------------------------------------------
+local function checkSolved()
+    if solved or not machine then
+        return
+    end
+
+    local current = machine.value or 0
+    if current == targetResult then
+        solved = true
+        onSolved()
+    end
+end
+
+local function enterFrameListener()
+    checkSolved()
+end
+
+---------------------------------------------------------
 function scene:create(event)
     local sceneGroup = self.view
     marbles = {}
     slots   = {}
+    solved  = false
+    machineSolvedAnimating = false
 
     local params = event.params or {}
     local leftValue  = params.left  or 9
     local rightValue = params.right or 3
+    targetResult     = leftValue - rightValue
 
     -----------------------------------------------------
     -- Background
@@ -517,13 +647,13 @@ function scene:create(event)
     local banner = display.newImageRect(
         sceneGroup,
         "imgs/banner.png",
-        788 *0.7,
-        206 *0.7
+        788 * 0.7,
+        206 * 0.7
     )
     banner.x = display.contentCenterX
     banner.y = 120
 
-    local title = display.newText({
+    display.newText({
         parent   = sceneGroup,
         text     = i18n.t("sub_title"),
         x        = banner.x,
@@ -598,13 +728,13 @@ function scene:create(event)
     spawnSlots(sceneGroup, rightValue)
 
     -----------------------------------------------------
-    -- Swipe Hints
+    -- Swipe Hints (optisch, aber Hand läuft separat)
     -----------------------------------------------------
-    local swipe_hint_90_a = display.newImageRect( 
-        sceneGroup, 
-        "imgs/swipe_hint.png", 
-        423, 
-        215 
+    local swipe_hint_90_a = display.newImageRect(
+        sceneGroup,
+        "imgs/swipe_hint.png",
+        423,
+        215
     )
     swipe_hint_90_a.x = display.contentCenterX-200
     swipe_hint_90_a.y = display.contentCenterY
@@ -612,17 +742,24 @@ function scene:create(event)
     swipe_hint_90_a.yScale = 0.5
     swipe_hint_90_a.rotation = 90
 
-    local swipe_hint_0_b = display.newImageRect( 
-        sceneGroup, 
-        "imgs/swipe_hint.png", 
-        423, 
-        215 
+    local swipe_hint_0_b = display.newImageRect(
+        sceneGroup,
+        "imgs/swipe_hint.png",
+        423,
+        215
     )
     swipe_hint_0_b.x = display.contentCenterX
     swipe_hint_0_b.y = display.contentCenterY-200
     swipe_hint_0_b.xScale = 0.5
     swipe_hint_0_b.yScale = 0.5
     swipe_hint_0_b.rotation = 0
+
+    -----------------------------------------------------
+    -- Koordinaten für die Hand-Animation (nur horizontal)
+    -----------------------------------------------------
+    swipeStartX = display.contentCenterX - 200
+    swipeEndX   = display.contentCenterX + 200
+    swipeY      = display.contentCenterY - 200
 
     -----------------------------------------------------
     -- Zählmaschine unten
@@ -634,7 +771,10 @@ function scene:create(event)
     })
     machine:setValue(0)
 
-    
+    machineStartX     = machine.group.x
+    machineStartY     = machine.group.y
+    machineStartScale = machine.group.xScale or 1
+
     -----------------------------------------------------
     -- Voller Balken unter den Rollen (nicht segmentiert)
     -----------------------------------------------------
@@ -700,8 +840,18 @@ function scene:create(event)
         1125 * 0.3,
         194 * 0.5
     )
-    arrow.x = backBtn.group.x 
+    arrow.x = backBtn.group.x
     arrow.y = backBtn.group.y
+
+    -----------------------------------------------------
+    -- Ergebnis-Listener aktivieren
+    -----------------------------------------------------
+    Runtime:addEventListener("enterFrame", enterFrameListener)
+
+    -----------------------------------------------------
+    -- Hand-Tutorial starten
+    -----------------------------------------------------
+    startSwipeTutorial(sceneGroup)
 end
 
 function scene:show(event)
@@ -711,6 +861,8 @@ function scene:hide(event)
 end
 
 function scene:destroy(event)
+    Runtime:removeEventListener("enterFrame", enterFrameListener)
+
     for i = #marbles, 1, -1 do
         local m = marbles[i]
         if m.removeSelf then
@@ -735,6 +887,12 @@ function scene:destroy(event)
     end
     segmentBarGroup = nil
     counterBar      = nil
+
+    stopSwipeTutorial()
+    if swipeHand and swipeHand.removeSelf then
+        swipeHand:removeSelf()
+    end
+    swipeHand = nil
 
     numHintLeft  = nil
     numHintRight = nil
