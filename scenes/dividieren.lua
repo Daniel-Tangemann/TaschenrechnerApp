@@ -135,10 +135,33 @@ local swipeHorzStartX     -- horizontaler Start (links)
 local swipeHorzEndX       -- horizontaler Endpunkt (rechts)
 local swipeHorzY          -- konstantes y für horizontale Geste
 
+-- Timer-Verwaltung (für processOneUnit u.Ä.)
+local activeTimers = {}
+
 -- Vorwärts-Deklarationen
 local marbleTouch
 local onSolved
 local enterFrameListener
+
+---------------------------------------------------------
+-- Timer-Helfer
+---------------------------------------------------------
+local function addTimer(delay, fn)
+    local t = timer.performWithDelay(delay, fn)
+    activeTimers[#activeTimers + 1] = t
+    return t
+end
+
+local function cancelAllTimers()
+    for i = 1, #activeTimers do
+        local t = activeTimers[i]
+        if t then
+            pcall(timer.cancel, t)
+        end
+        activeTimers[i] = nil
+    end
+    activeTimers = {}
+end
 
 ---------------------------------------------------------
 -- Hand-Tutorial: stoppen
@@ -209,6 +232,8 @@ local function startSwipeTutorial(parentGroup)
                         alpha = 0,
                         onComplete = function()
                             if tutorialActive then
+                                -- optional mit addTimer, aber hier okay,
+                                -- weil tutorialActive die Wirkung begrenzt
                                 timer.performWithDelay(500, playNext)
                             end
                         end
@@ -317,6 +342,13 @@ end
 -- (füllt ein Segment, ggf. komplette Gruppe → Counter + Blink)
 ---------------------------------------------------------
 local function processOneUnit()
+    -- Safety: wenn Szene/ Maschine nicht mehr gültig, abbrechen
+    if not machine or machineSolvedAnimating or solved then
+        isCountingUnits = false
+        pendingUnits    = 0
+        return
+    end
+
     if pendingUnits <= 0 then
         isCountingUnits = false
         return
@@ -336,13 +368,15 @@ local function processOneUnit()
         -- komplette Gruppe voll → 1 zum Quotienten und letzter Balken blinkt
         blinkLastSegment(divisor)
         groupCount = 0
-        machine:increment()
+        if machine and machine.increment then
+            machine:increment()
+        end
     end
 
     updateSegmentBar()
 
     if pendingUnits > 0 then
-        timer.performWithDelay(UNIT_COUNT_DELAY, processOneUnit)
+        addTimer(UNIT_COUNT_DELAY, processOneUnit)
     else
         isCountingUnits = false
     end
@@ -420,7 +454,7 @@ local function checkSolved()
 
     -- Rest-Text setzen
     if remainderText then
-        remainderText.text = i18n.t("div_re_text") .. tostring(remainderTarget) -- here
+        remainderText.text = i18n.t("div_re_text") .. tostring(remainderTarget)
     end
 
     solved = true
@@ -728,6 +762,7 @@ function scene:create(event)
     machineSolvedAnimating = false
     solvedListenerAdded    = false
     doubleTapUsed     = false
+    cancelAllTimers()
 
     local params     = event.params or {}
     local leftValue  = params.left  or 10
@@ -827,7 +862,7 @@ function scene:create(event)
     -----------------------------------------------------
     remainderText = display.newText({
         parent   = sceneGroup,
-        text     = i18n.t("div_re_text"), -- here
+        text     = i18n.t("div_re_text"),
         x        = 540,
         y        = 1550,
         font     = native.systemFontBold,
@@ -835,6 +870,7 @@ function scene:create(event)
         align    = "center",
         width    = areaW * 0.8,
     })
+
     -----------------------------------------------------
     -- Murmeln spawnen
     -----------------------------------------------------
@@ -979,28 +1015,63 @@ function scene:create(event)
     )
     arrow.x = backBtn.group.x 
     arrow.y = backBtn.group.y
+end
 
-    -----------------------------------------------------
-    -- Ergebnis-Listener + Hand-Tutorial aktivieren
-    -----------------------------------------------------
-    Runtime:addEventListener("enterFrame", enterFrameListener)
-    solvedListenerAdded = true
+---------------------------------------------------------
+-- scene:show – Listener registrieren, Tutorial starten
+---------------------------------------------------------
+function scene:show(event)
+    local phase = event.phase
 
-    startSwipeTutorial(sceneGroup)
+    if phase == "will" then
+        -- hier könnte man ggf. Zustand vorbereiten
+    elseif phase == "did" then
+        Runtime:addEventListener("enterFrame", enterFrameListener)
+        solvedListenerAdded = true
+
+        -- Tutorial nur starten, wenn noch nicht gelöst
+        if not solved and self.view then
+            startSwipeTutorial(self.view)
+        end
+    end
+end
+
+---------------------------------------------------------
+-- scene:hide – Listener / Timer sauber entfernen
+---------------------------------------------------------
+function scene:hide(event)
+    local phase = event.phase
+
+    if phase == "will" then
+        if solvedListenerAdded then
+            Runtime:removeEventListener("enterFrame", enterFrameListener)
+            solvedListenerAdded = false
+        else
+            -- zur Sicherheit
+            Runtime:removeEventListener("enterFrame", enterFrameListener)
+        end
+
+        stopSwipeTutorial()
+        cancelAllTimers()
+        isCountingUnits = false
+        pendingUnits    = 0
+    elseif phase == "did" then
+        -- nach dem Ausblenden
+    end
 end
 
 ---------------------------------------------------------
 function scene:destroy(event)
-    if solvedListenerAdded then
-        Runtime:removeEventListener("enterFrame", enterFrameListener)
-        solvedListenerAdded = false
-    end
+    -- Safety: Listener & Timer aufräumen
+    Runtime:removeEventListener("enterFrame", enterFrameListener)
+    solvedListenerAdded = false
 
+    cancelAllTimers()
     stopSwipeTutorial()
 
     for i = #marbles, 1, -1 do
         local m = marbles[i]
-        if m.removeSelf then m:removeSelf() end
+        if m and m.removeSelf then m:removeSelf() end
         marbles[i] = nil
     end
     marbles = {}
@@ -1020,11 +1091,24 @@ function scene:destroy(event)
     end
     swipeHand = nil
 
+    -- Num-Hints Listener entfernen
+    if numHintLeft then
+        numHintLeft:removeEventListener("tap", onNumHintDoubleTap)
+        if numHintLeft.removeSelf then numHintLeft:removeSelf() end
+    end
+    if numHintRight then
+        numHintRight:removeEventListener("tap", onNumHintDoubleTap)
+        if numHintRight.removeSelf then numHintRight:removeSelf() end
+    end
     numHintLeft  = nil
     numHintRight = nil
+
+    remainderText = nil
 end
 
 scene:addEventListener("create", scene)
+scene:addEventListener("show", scene)
+scene:addEventListener("hide", scene)
 scene:addEventListener("destroy", scene)
 
 return scene
