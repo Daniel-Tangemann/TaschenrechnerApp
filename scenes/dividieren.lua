@@ -866,9 +866,9 @@ function scene:create(event)
         x        = 540,
         y        = 1550,
         font     = native.systemFontBold,
-        fontSize = 100,
+        fontSize = 120,
         align    = "center",
-        width    = areaW * 0.8,
+        width    = areaW * 1.5,
     })
 
     -----------------------------------------------------

@@ -266,6 +266,24 @@ local function spawnOneFromBundle(bundleMarble)
 
     m:setFillColor(spawnMarbleColor[1], spawnMarbleColor[2], spawnMarbleColor[3])
 
+    -- 🔽 Z-ORDER FIX: neue Einer-Murmel unter der Maschine einsortieren
+    if machine and machine.group and parent == machine.group.parent then
+        -- Index der Maschine im Parent suchen
+        local idx
+        for i = 1, parent.numChildren do
+            if parent[i] == machine.group then
+                idx = i
+                break
+            end
+        end
+
+        if idx then
+            -- m auf denselben Index setzen → Maschine rutscht eins nach vorne,
+            -- bleibt also über m
+            parent:insert(idx, m)
+        end
+    end
+
     m:addEventListener("touch", function(ev)
         return _G.sub_m_arbleTouch and _G.sub_m_arbleTouch(ev) or false
     end)
