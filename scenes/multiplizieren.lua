@@ -3,10 +3,10 @@ local composer       = require("composer")
 local scene          = composer.newScene()
 
 local layout         = require("layout")
-local Button         = require("ui.button")
-local HelpPopup      = require("ui.help_popup")
+local Button         = require("UI.button")
+local HelpPopup      = require("UI.help_popup")
 local i18n           = require("lang.i18n")
-local CounterMachine = require("ui.counter_machine")
+local CounterMachine = require("UI.counter_machine")
 local Sound          = require("sound")
 
 ---------------------------------------------------------

@@ -5,11 +5,11 @@ local composer = require("composer")
 local scene    = composer.newScene()
 
 local layout   = require("layout")
-local Button   = require("ui.button")
-local Display  = require("ui.display")
-local HelpPopup = require("ui.help_popup")
+local Button   = require("UI.button")
+local Display  = require("UI.display")
+local HelpPopup = require("UI.help_popup")
 local i18n     = require("lang.i18n")
-local LangMenu = require("ui.lang_menu")
+local LangMenu = require("UI.lang_menu")
 
 ---------------------------------------------------------
 -- Interner Zustand des Rechners

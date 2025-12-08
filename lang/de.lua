@@ -39,6 +39,9 @@ local M = {
     lang_en = "Englisch",
     lang_es = "Spanisch",
     lang_fr = "Französisch",
+
+    -- Dividieren: Rest-Anzeige
+    div_re_text = "Rest: ",
 }
 
 return M

@@ -3,10 +3,10 @@ local composer       = require("composer")
 local scene          = composer.newScene()
 
 local layout         = require("layout")
-local Button         = require("ui.button")
-local HelpPopup      = require("ui.help_popup")
+local Button         = require("UI.button")
+local HelpPopup      = require("UI.help_popup")
 local i18n           = require("lang.i18n")
-local CounterMachine = require("ui.counter_machine")
+local CounterMachine = require("UI.counter_machine")
 local Sound          = require("sound")
 
 ---------------------------------------------------------
@@ -96,6 +96,7 @@ local groupCount     = 0
 local maxRemainderUnits = 0  -- wie viele "Einheiten" dürfen im Rest landen (Dividend % Divisor)
 local remainderUnits    = 0  -- tatsächliche Einheiten im Rest
 local remainderCount    = 0  -- Anzahl der Rest-Murmeln (für Slot-Auswahl)
+local remainderText          -- Rest-Anzeige
 
 -- Segmentbalken
 local segmentBarGroup
@@ -405,7 +406,9 @@ local function checkSolved()
         return
     end
     if remainderUnits ~= remainderTarget then
-        return
+        if groupCount ~= remainderTarget then
+            return
+        end
     end
 
     -- Keine "freien" Murmeln mehr: alles ist entweder entfernt oder im Rest
@@ -413,6 +416,11 @@ local function checkSolved()
         if m and (not m.removed) and (not m.inRemainder) then
             return
         end
+    end
+
+    -- Rest-Text setzen
+    if remainderText then
+        remainderText.text = i18n.t("div_re_text") .. tostring(remainderTarget) -- here
     end
 
     solved = true
@@ -814,6 +822,19 @@ function scene:create(event)
     -----------------------------------------------------
     computeRestSlots()
 
+    -----------------------------------------------------
+    -- Rest-Text 
+    -----------------------------------------------------
+    remainderText = display.newText({
+        parent   = sceneGroup,
+        text     = i18n.t("div_re_text"), -- here
+        x        = 540,
+        y        = 1550,
+        font     = native.systemFontBold,
+        fontSize = 120,
+        align    = "center",
+        width    = areaW * 0.8,
+    })
     -----------------------------------------------------
     -- Murmeln spawnen
     -----------------------------------------------------

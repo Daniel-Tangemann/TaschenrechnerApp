@@ -1,7 +1,7 @@
 -- ui/lang_menu.lua
 -- Einfaches Dropdown mit Flaggen zur Sprachauswahl
 
-local Button = require("ui.button")
+local Button = require("UI.button")
 local i18n   = require("lang.i18n")
 
 local LangMenu = {}
