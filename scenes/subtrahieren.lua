@@ -632,6 +632,10 @@ local function checkSolved()
         return
     end
 
+    if not areAllSlotsFilled() then
+        return
+    end
+    
     local current = machine.value or 0
     if current == targetResult then
         solved = true

@@ -84,6 +84,15 @@ function Display.new(parentGroup)
     --------------------------------------------------------
     -- Ziffern- und Operator-Sprites
     --------------------------------------------------------
+    -- Feintuning der Operator-Positionen (pro Frame)
+    -- Frames: 1="+", 2="*", 3="-", 4="/"
+    self.opOffsets = {
+        [1] = -5,   -- + 
+        [2] = -2,   -- ×
+        [3] = 0,   -- -
+        [4] = 7,   -- ÷
+    }
+
     local numberSheet, numberSeq = createNumberSheet()
     local opSheet, opSeq = createOperatorSheet()
 
@@ -142,17 +151,23 @@ function Display.new(parentGroup)
     makeDigitPlaceholder(2)
     makeDigitPlaceholder(4)
 
-    -- Operator-Platzhalter (Text mit allen vier Operatoren)
-    local opPlaceholder = display.newText({
-        parent   = self.placeholderGroup,
-        text     = "+ − × ÷",
-        x        = slotX[3],
-        y        = yPos,
-        font     = native.systemFontBold,
-        fontSize = DIGIT_FRAME_H * digitScale * 0.35,  -- ungefähr passend zu den Sprites
-        align    = "center"
-    })
-    opPlaceholder:setFillColor(1, 1, 1, 0.18)
+    --------------------------------------------------------
+    -- Operator-Platzhalter: dezentes Grau-Rechteck
+    --------------------------------------------------------
+    local opPlaceholderRect = display.newRoundedRect(
+        self.placeholderGroup,
+        slotX[3],
+        yPos,
+        OP_FRAME_W,   -- Breite etwa passend zu einer Ziffer
+        OP_FRAME_H,   -- Höhe passend
+        20                                   -- leichte Rundung
+    )
+
+    -- dezentes Grau, wie die Ziffern-Platzhalter
+    opPlaceholderRect:setFillColor(0, 0, 1, 0.18)
+    self.opPlaceholderRect = opPlaceholderRect
+
+
 
     --------------------------------------------------------
     -- Aktive Ziffern- und Operator-Sprites (liegen über den Platzhaltern)
@@ -185,11 +200,12 @@ function Display.new(parentGroup)
 
     -- Operator-Sprite in Slot 3
     self.opSprite = display.newSprite(self.group, self.opSheet, self.opSeqData)
-    self.opSprite.x = slotX[3]
-    self.opSprite.y = yPos
+    self.opSprite.baseX = slotX[3]   -- speichern die Grundposition
+    self.opSprite.y     = yPos
+    self.opSprite.x     = self.opSprite.baseX   -- initial
 
     -- Operator-Skalierung
-    local opScale = self.digitScale * 1.5
+    local opScale = self.digitScale * 2
     self.opSprite.xScale = opScale
     self.opSprite.yScale = opScale
     self.opSprite.isVisible = false
@@ -251,9 +267,14 @@ local function setOperatorSprite(self, opChar)
     if frameIndex then
         self.opSprite:setFrame(frameIndex)
         self.opSprite.isVisible = true
+
+        -- X-Offset anwenden
+        local off = self.opOffsets[frameIndex] or 0
+        self.opSprite.x = self.opSprite.baseX + off
     else
         self.opSprite.isVisible = false
     end
+
 end
 
 ------------------------------------------------------------------

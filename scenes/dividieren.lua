@@ -444,10 +444,11 @@ local function checkSolved()
     if currentQ ~= quotientTarget then
         return
     end
-    if remainderUnits ~= remainderTarget then
-        if groupCount ~= remainderTarget then
-            return
-        end
+
+    -- Rest kann im Restfeld UND/oder im Segmentbalken liegen
+    local totalRemainder = (remainderUnits or 0) + (groupCount or 0)
+    if totalRemainder ~= remainderTarget then
+        return
     end
 
     -- Keine "freien" Murmeln mehr: alles ist entweder entfernt oder im Rest
