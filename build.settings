@@ -1,57 +1,72 @@
---
--- For more information on build.settings, see the Project Build Settings guide at:
--- https://docs.coronalabs.com/guide/distribution/buildSettings
---
+-- build.settings für "Calc Play 1x1"
 
 settings =
 {
-	orientation =
-	{
-		-- Supported values for orientation:
-		-- portrait, portraitUpsideDown, landscapeLeft, landscapeRight
-		default = "portrait",
-		supported = { "portrait", },
-	},
+    ----------------------------------------------------------------------------
+    -- Ausrichtung
+    ----------------------------------------------------------------------------
+    orientation =
+    {
+        -- Nur Hochformat
+        default   = "portrait",
+        supported = { "portrait" },
+    },
 
-	--
-	-- Android section
-	--
-	android =
-	{
-		usesPermissions =
-		{
-			"android.permission.INTERNET",
-		},
-	},
+    ----------------------------------------------------------------------------
+    -- Android
+    ----------------------------------------------------------------------------
+    android =
+    {
+        -- Keine zusätzlichen Berechtigungen:
+        -- Kein INTERNET, kein Zugriff auf Speicher, Standort usw.
+        usesPermissions = {},
+        package = "com.matissimo.calcplay", -- Bundel-ID (nie ändern!!!)
+        minSdkVersion = "21", -- Google Play verlangt mindestens diese Version
+    },
 
-	--
-	-- iOS section
-	--
-	iphone =
-	{
-		xcassets = "Images.xcassets",
-		plist =
-		{
-			UIStatusBarHidden = false,
-			UILaunchStoryboardName = "LaunchScreen",
-		},
-	},
+    ----------------------------------------------------------------------------
+    -- iOS
+    ----------------------------------------------------------------------------
+    iphone =
+    {
+        xcassets = "Images.xcassets",
 
-	--
-	-- Plugins section
-	--
-	plugins =
-	{
+        plist =
+        {
+            UIStatusBarHidden      = false,
+            UILaunchStoryboardName = "LaunchScreen",
 
-	},
+            -- Nur Hochformat (spiegelt die orientation-Angabe wider)
+            UISupportedInterfaceOrientations =
+            {
+                "UIInterfaceOrientationPortrait",
+            },
+        },
+    },
 
-	--
-	-- Project section
-	--
-	excludeFiles =
-	{
-		-- Exclude unnecessary files for each platform
-		all = { "Icon.png", "Icon-*dpi.png", "Images.xcassets", },
-		android = { "LaunchScreen.storyboardc", },
-	},
+    ----------------------------------------------------------------------------
+    -- Plugins (keine)
+    ----------------------------------------------------------------------------
+    plugins =
+    {
+        -- leer
+    },
+
+    ----------------------------------------------------------------------------
+    -- Projekt: Dateien für bestimmte Plattformen ausschließen
+    ----------------------------------------------------------------------------
+    excludeFiles =
+    {
+        all =
+        {
+            "Icon.png",
+            "Icon-*dpi.png",
+            "Images.xcassets",
+        },
+
+        android =
+        {
+            "LaunchScreen.storyboardc",
+        },
+    },
 }

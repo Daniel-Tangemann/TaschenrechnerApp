@@ -292,6 +292,16 @@ function scene:create(event)
 
             local isDigit = tonumber(label) ~= nil
             local fontSize = isDigit and 72 or 48
+            if  label == "/" then  
+                label = "÷"
+                fontSize = 120
+            end
+            if  label == "*" then 
+                fontSize = 120 
+                label = "x"
+            end
+            if  label == "-" then fontSize = 120 end
+            if  label == "+" then fontSize = 120 end
 
             Button.new(sceneGroup, {
                 image  = "imgs/btn_key.png",
@@ -311,7 +321,13 @@ function scene:create(event)
                     elseif label == "DEL" then
                         onDeletePressed()
                     else
-                        onOperatorPressed(label)
+                        if label == "÷" then 
+                            onOperatorPressed("/") 
+                        elseif label == "x" then
+                            onOperatorPressed("*")
+                        else
+                            onOperatorPressed(label)
+                        end
                     end
                 end
             })
@@ -331,6 +347,7 @@ function scene:create(event)
         x      = cx1,
         y      = cy1,
         label = "=",
+        fontSize = 160,
         playSound = false,
         onTap  = onEqualsPressed
     })
