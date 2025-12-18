@@ -20,7 +20,7 @@ settings =
         -- Keine zusätzlichen Berechtigungen:
         -- Kein INTERNET, kein Zugriff auf Speicher, Standort usw.
         usesPermissions = {},
-        package = "com.matissimo.calcplay", -- Bundel-ID (nie ändern!!!)
+        package = "com.matissimo.calcplay1x1", -- Bundel-ID (nie ändern!!!)
         minSdkVersion = "21", -- Google Play verlangt mindestens diese Version
     },
 

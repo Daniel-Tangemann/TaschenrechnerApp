@@ -1,3 +1,9 @@
 ToDo:
-- dividieren.lua anpassen 70/4 (bei zufälliger Aufgabe) hat 17 ergeben - ohne Rest
+- LED-Animation für Counter-Machine
+- Veröffentlichen:
+    - Screenshots neu erstellen
+    - Banner neu erstellen
+    - Logo anpassen
+    - Texte neu schreiben
+    - ggf. neuen Keystore anlegen
 

@@ -289,10 +289,10 @@ local function swallowIntoCloner(marble, onDone)
 
     transition.to(marble, {
         time   = 180,
-        x      = cloneCenterX,
-        y      = cloneCenterY - 40,
-        xScale = 0.3,
-        yScale = 0.3,
+        x      = cloneCenterX + 20,
+        y      = cloneCenterY - 20,
+        xScale = 1,
+        yScale = 1,
         alpha  = 0.0,
         onComplete = function()
             if marble.removeSelf then
